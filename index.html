@@ -145,6 +145,8 @@
 
   .chart-wrap { position: relative; width: 100%; height: 220px; }
   .chart-wrap.donut { height: 240px; }
+  .chart-wrap.wide { height: 230px; }
+  .chart-scroll { overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; }
 
   .empty-state { text-align: center; padding: 28px 12px; color: var(--text-secondary); }
   .empty-state .big { font-size: 2rem; margin-bottom: 8px; }
@@ -305,6 +307,25 @@ function macroColor(macro) {
   const slot = idx === -1 ? 8 : idx + 1;
   return cssVar("--series-" + slot);
 }
+// Escolhe texto branco ou escuro por cima de uma cor de preenchimento, pela luminância (WCAG).
+function textColorForFill_(hex) {
+  const h = (hex || "").replace("#", "");
+  if (h.length !== 6) return "#ffffff";
+  const r = parseInt(h.substring(0, 2), 16) / 255;
+  const g = parseInt(h.substring(2, 4), 16) / 255;
+  const b = parseInt(h.substring(4, 6), 16) / 255;
+  const lin = (v) => (v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
+  const L = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+  return L > 0.55 ? "#1a1a19" : "#ffffff";
+}
+function hexToRgba(hex, alpha) {
+  const h = (hex || "").replace("#", "");
+  if (h.length !== 6) return hex;
+  const r = parseInt(h.substring(0, 2), 16);
+  const g = parseInt(h.substring(2, 4), 16);
+  const b = parseInt(h.substring(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
 
 /* ---------- estado ---------- */
 const state = {
@@ -382,6 +403,23 @@ function periodoMonthKeys() {
   }
   return quarterMonths(state.geralQuarter).map((m) => `${state.geralYear}-${String(m).padStart(2,"0")}`);
 }
+// mesmo período, um ano ou um trimestre antes do que está selecionado agora
+// (pra comparação: ano atual x ano anterior, trimestre atual x trimestre anterior).
+function periodoAnteriorInfo() {
+  if (state.geralPeriodType === "ano") {
+    const prevYear = state.geralYear - 1;
+    return {
+      keys: Array.from({length:12}, (_,i) => `${prevYear}-${String(i+1).padStart(2,"0")}`),
+      label: String(prevYear),
+    };
+  }
+  const s = shiftQuarter(state.geralYear, state.geralQuarter, -1);
+  return {
+    keys: quarterMonths(s.quarter).map((m) => `${s.year}-${String(m).padStart(2,"0")}`),
+    label: quarterShortLabel(s.year, s.quarter),
+  };
+}
+function quarterShortLabel(year, q) { return `${q}ºT/${String(year).slice(2)}`; }
 function lancamentosNoPeriodoGeral() {
   const keys = new Set(periodoMonthKeys());
   return state.lancamentos.filter((l) => keys.has(monthKey(l.data)));
@@ -602,6 +640,11 @@ function renderPainelMes(root) {
   const despesas = sum(doMes.filter((l) => l.tipo === "despesa"));
   const saldo = receitas - despesas;
 
+  const prevMk = shiftMonthKey(mk, -1);
+  const prevDespesas = sum(state.lancamentos.filter((l) => monthKey(l.data) === prevMk && l.tipo === "despesa"));
+  const mkLabel = monthLabel(mk).split(" ")[0];
+  const prevMkLabel = monthLabel(prevMk).split(" ")[0];
+
   const parcelasAbertas = state.lancamentos.filter((l) => l.forma_entrada === "parcelado" && l.tipo === "despesa" && l.data >= todayISO());
   const dividaFutura = sum(parcelasAbertas);
   const comprasAbertas = new Set(parcelasAbertas.map((l) => l.parcelamento_id)).size;
@@ -637,6 +680,18 @@ function renderPainelMes(root) {
     </div>
 
     <div class="card">
+      <h2>Comparativo por categoria — ${mkLabel} vs ${prevMkLabel}</h2>
+      ${(despesas > 0 || prevDespesas > 0) ? `
+        <div class="legend-row" style="margin-bottom:6px;">
+          <div class="item"><span class="sw" style="background:${hexToRgba(cssVar("--critical"), 0.35)};"></span>${escapeHTML(prevMkLabel)}</div>
+          <div class="item"><span class="sw" style="background:${cssVar("--critical")};"></span>${escapeHTML(mkLabel)}</div>
+        </div>
+        <p class="muted" style="margin:-2px 0 10px;">Arraste para o lado para ver todas as categorias · ▲ gastou mais · ▼ gastou menos que ${escapeHTML(prevMkLabel)}</p>
+        <div class="chart-scroll"><div class="chart-wrap wide" id="chart-catcomp-wrap"><canvas id="chart-catcomp"></canvas></div></div>
+      ` : `<div class="empty-state"><div class="big">📊</div>Sem despesas suficientes para comparar com ${escapeHTML(prevMkLabel)}.</div>`}
+    </div>
+
+    <div class="card">
       <h2>Parcelas futuras comprometidas</h2>
       <div class="chart-wrap"><canvas id="chart-parc"></canvas></div>
     </div>
@@ -650,6 +705,7 @@ function renderPainelMes(root) {
   document.getElementById("card-divida-futura")?.addEventListener("click", () => showParcelasAbertas());
   drawReceitasDespesasChart(last6MonthKeys(mk));
   if (despesas > 0) drawCategoriaChart(doMes.filter((l) => l.tipo === "despesa"));
+  if (despesas > 0 || prevDespesas > 0) drawCategoriaComparativoChart(mk, prevMk, mkLabel, prevMkLabel);
   drawParcelasChart(mk);
 }
 
@@ -714,6 +770,10 @@ function renderPainelGeral(root) {
   const despesas = sum(periodo.filter((l) => l.tipo === "despesa"));
   const saldo = receitas - despesas;
   const periodoLabel = state.geralPeriodType === "ano" ? String(state.geralYear) : quarterLabel(state.geralYear, state.geralQuarter);
+  const periodoLabelCurto = state.geralPeriodType === "ano" ? String(state.geralYear) : quarterShortLabel(state.geralYear, state.geralQuarter);
+
+  const anterior = periodoAnteriorInfo();
+  const prevDespesas = sum(state.lancamentos.filter((l) => l.tipo === "despesa" && anterior.keys.includes(monthKey(l.data))));
 
   root.innerHTML = `
     ${state.loading ? `<div class="muted" style="margin-bottom:8px;">Atualizando…</div>` : ""}
@@ -743,12 +803,25 @@ function renderPainelGeral(root) {
         ? `<div class="chart-wrap donut"><canvas id="chart-cat"></canvas></div>`
         : `<div class="empty-state"><div class="big">🗂️</div>Sem despesas neste período.</div>`}
     </div>
+
+    <div class="card">
+      <h2>Comparativo por categoria — ${escapeHTML(periodoLabelCurto)} vs ${escapeHTML(anterior.label)}</h2>
+      ${(despesas > 0 || prevDespesas > 0) ? `
+        <div class="legend-row" style="margin-bottom:6px;">
+          <div class="item"><span class="sw" style="background:${hexToRgba(cssVar("--critical"), 0.35)};"></span>${escapeHTML(anterior.label)}</div>
+          <div class="item"><span class="sw" style="background:${cssVar("--critical")};"></span>${escapeHTML(periodoLabelCurto)}</div>
+        </div>
+        <p class="muted" style="margin:-2px 0 10px;">Arraste para o lado para ver todas as categorias · ▲ gastou mais · ▼ gastou menos que ${escapeHTML(anterior.label)}</p>
+        <div class="chart-scroll"><div class="chart-wrap wide" id="chart-catcomp-wrap"><canvas id="chart-catcomp"></canvas></div></div>
+      ` : `<div class="empty-state"><div class="big">📊</div>Sem despesas suficientes para comparar com ${escapeHTML(anterior.label)}.</div>`}
+    </div>
   `;
   root.querySelectorAll("#geral-period-toggle button").forEach((b) => {
     b.addEventListener("click", () => { state.geralPeriodType = b.dataset.period; renderCurrentTab(); });
   });
   drawReceitasDespesasChart(periodoMonthKeys());
   if (despesas > 0) drawCategoriaChart(periodo.filter((l) => l.tipo === "despesa"));
+  if (despesas > 0 || prevDespesas > 0) drawCategoriaComparativoChart(periodoMonthKeys(), anterior.keys, periodoLabelCurto, anterior.label);
 }
 
 function sum(list) { return list.reduce((acc, l) => acc + (Number(l.valor) || 0), 0); }
@@ -836,22 +909,153 @@ function drawCategoriaChart(despesasList) {
   const byMacro = {};
   despesasList.forEach((l) => { byMacro[l.macrocategoria] = (byMacro[l.macrocategoria] || 0) + Number(l.valor || 0); });
   const entries = Object.entries(byMacro).sort((a,b) => b[1]-a[1]);
+  const total = entries.reduce((s, e) => s + e[1], 0);
+  const colors = entries.map((e) => macroColor(e[0]));
   const ctx = document.getElementById("chart-cat");
   if (!ctx) return;
+
+  // Desenha o % de cada fatia sobre o próprio gráfico — só nas fatias grandes o
+  // bastante pra caber o texto sem virar bagunça; as menores ficam com o % na
+  // legenda (abaixo) e no tooltip ao tocar.
+  const donutPctPlugin = {
+    id: "donutPct",
+    afterDatasetsDraw(chart) {
+      const meta = chart.getDatasetMeta(0);
+      if (!meta || meta.hidden || !total) return;
+      const c = chart.ctx;
+      c.save();
+      c.font = "700 11px system-ui, -apple-system, sans-serif";
+      c.textAlign = "center";
+      c.textBaseline = "middle";
+      meta.data.forEach((arc, i) => {
+        if (chart.getDataVisibility && !chart.getDataVisibility(i)) return;
+        const value = entries[i][1];
+        const pct = value / total;
+        if (pct < 0.06) return;
+        const angle = (arc.startAngle + arc.endAngle) / 2;
+        const radius = (arc.innerRadius + arc.outerRadius) / 2;
+        const x = arc.x + Math.cos(angle) * radius;
+        const y = arc.y + Math.sin(angle) * radius;
+        c.fillStyle = textColorForFill_(colors[i]);
+        c.fillText(Math.round(pct * 100) + "%", x, y);
+      });
+      c.restore();
+    },
+  };
+
   state.charts.cat = new Chart(ctx, {
     type: "doughnut",
     data: {
       labels: entries.map((e) => e[0]),
-      datasets: [{ data: entries.map((e) => e[1]), backgroundColor: entries.map((e) => macroColor(e[0])), borderColor: cssVar("--surface-1"), borderWidth: 2 }],
+      datasets: [{ data: entries.map((e) => e[1]), backgroundColor: colors, borderColor: cssVar("--surface-1"), borderWidth: 2 }],
     },
     options: {
       cutout: "62%",
       plugins: {
-        legend: { position: "bottom", labels: { color: cssVar("--text-secondary"), font: baseChartFont(), boxWidth: 9, boxHeight: 9, padding: 12 } },
-        tooltip: tooltipStyle((c) => formatBRL(c.raw)),
+        legend: {
+          position: "bottom",
+          labels: {
+            color: cssVar("--text-secondary"), font: baseChartFont(), boxWidth: 9, boxHeight: 9, padding: 12,
+            generateLabels: () => entries.map((e, i) => ({
+              text: `${e[0]} — ${total ? Math.round((e[1] / total) * 100) : 0}%`,
+              fillStyle: colors[i], strokeStyle: colors[i], index: i,
+            })),
+          },
+          onClick: (evt, item, legend) => {
+            legend.chart.toggleDataVisibility(item.index);
+            legend.chart.update();
+          },
+        },
+        tooltip: tooltipStyle((c) => {
+          const pct = total ? Math.round((c.raw / total) * 100) : 0;
+          return `${formatBRL(c.raw)} (${pct}%)`;
+        }),
       },
       maintainAspectRatio: false,
     },
+    plugins: [donutPctPlugin],
+  });
+}
+
+/* Comparativo por categoria: período atual x período anterior (mês x mês, trimestre
+   x trimestre, ou ano x ano), uma barra dupla por categoria, ordenado da maior
+   despesa (no período atual) pra menor, com uma setinha + % de variação desenhada
+   acima de cada par de barras. Rola pro lado quando tem categoria demais pra caber
+   na tela. curKeys/prevKeys: string "AAAA-MM" ou array delas (trimestre/ano). */
+function drawCategoriaComparativoChart(curKeys, prevKeys, curLabel, prevLabel) {
+  destroyChart("catcomp");
+  const curSet = new Set(Array.isArray(curKeys) ? curKeys : [curKeys]);
+  const prevSet = new Set(Array.isArray(prevKeys) ? prevKeys : [prevKeys]);
+  const curByMacro = {}, prevByMacro = {};
+  state.lancamentos.forEach((l) => {
+    if (l.tipo !== "despesa") return;
+    const lk = monthKey(l.data);
+    if (curSet.has(lk)) curByMacro[l.macrocategoria] = (curByMacro[l.macrocategoria] || 0) + Number(l.valor || 0);
+    else if (prevSet.has(lk)) prevByMacro[l.macrocategoria] = (prevByMacro[l.macrocategoria] || 0) + Number(l.valor || 0);
+  });
+  const allMacros = new Set([...Object.keys(curByMacro), ...Object.keys(prevByMacro)]);
+  const rows = Array.from(allMacros)
+    .map((m) => ({ macro: m, prev: prevByMacro[m] || 0, cur: curByMacro[m] || 0 }))
+    .filter((r) => r.prev > 0 || r.cur > 0)
+    .sort((a, b) => b.cur - a.cur || b.prev - a.prev);
+
+  const ctx = document.getElementById("chart-catcomp");
+  if (!ctx || !rows.length) return;
+
+  const wrapEl = document.getElementById("chart-catcomp-wrap");
+  if (wrapEl) wrapEl.style.width = Math.max(rows.length * 82, 340) + "px";
+
+  const prevColor = hexToRgba(cssVar("--critical"), 0.35);
+  const curColor = cssVar("--critical");
+  const goodColor = cssVar("--good");
+
+  const deltaPlugin = {
+    id: "catcompDelta",
+    afterDatasetsDraw(chart) {
+      const metaPrev = chart.getDatasetMeta(0);
+      const metaCur = chart.getDatasetMeta(1);
+      if (!metaCur || metaCur.hidden) return;
+      const c = chart.ctx;
+      c.save();
+      c.font = "700 10px system-ui, -apple-system, sans-serif";
+      c.textAlign = "center";
+      rows.forEach((r, i) => {
+        const barCur = metaCur.data[i];
+        const barPrev = metaPrev.data[i];
+        if (!barCur) return;
+        let text, color;
+        if (r.prev === 0 && r.cur > 0) { text = "novo"; color = curColor; }
+        else if (r.prev > 0 && r.cur === 0) { text = "▼100%"; color = goodColor; }
+        else {
+          const pct = Math.round(((r.cur - r.prev) / r.prev) * 100);
+          if (pct === 0) { text = "="; color = cssVar("--muted"); }
+          else { text = (pct > 0 ? "▲" : "▼") + Math.abs(pct) + "%"; color = pct > 0 ? curColor : goodColor; }
+        }
+        const topY = Math.min(barCur.y, barPrev ? barPrev.y : barCur.y) - 6;
+        c.fillStyle = color;
+        c.fillText(text, barCur.x, topY);
+      });
+      c.restore();
+    },
+  };
+
+  const opts = chartBaseOptions({ legend: false });
+  opts.layout = { padding: { top: 22 } };
+  opts.scales.x.ticks.autoSkip = false;
+  opts.scales.x.ticks.maxRotation = 45;
+  opts.scales.x.ticks.minRotation = 0;
+
+  state.charts.catcomp = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels: rows.map((r) => r.macro),
+      datasets: [
+        { label: prevLabel, data: rows.map((r) => r.prev), backgroundColor: prevColor, borderRadius: 4, maxBarThickness: 20 },
+        { label: curLabel, data: rows.map((r) => r.cur), backgroundColor: curColor, borderRadius: 4, maxBarThickness: 20 },
+      ],
+    },
+    options: opts,
+    plugins: [deltaPlugin],
   });
 }
 function drawParcelasChart(mk) {
