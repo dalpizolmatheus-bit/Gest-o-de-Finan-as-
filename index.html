@@ -595,7 +595,7 @@ function renderPainelMes(root) {
   const despesas = sum(doMes.filter((l) => l.tipo === "despesa"));
   const saldo = receitas - despesas;
 
-  const parcelasAbertas = state.lancamentos.filter((l) => l.forma_entrada === "parcelado" && l.data >= todayISO());
+  const parcelasAbertas = state.lancamentos.filter((l) => l.forma_entrada === "parcelado" && l.tipo === "despesa" && l.data >= todayISO());
   const dividaFutura = sum(parcelasAbertas);
   const comprasAbertas = new Set(parcelasAbertas.map((l) => l.parcelamento_id)).size;
 
@@ -649,7 +649,7 @@ function renderPainelMes(root) {
 /* mostra, numa folha, todas as parcelas futuras em aberto — com edição e exclusão,
    acionado ao tocar no card "Dívida futura em aberto" do Painel Mês. */
 function showParcelasAbertas() {
-  const parcelasAbertas = state.lancamentos.filter((l) => l.forma_entrada === "parcelado" && l.data >= todayISO());
+  const parcelasAbertas = state.lancamentos.filter((l) => l.forma_entrada === "parcelado" && l.tipo === "despesa" && l.data >= todayISO());
   const dividaFutura = sum(parcelasAbertas);
   const list = parcelasAbertas.slice().sort((a, b) => (a.data || "").localeCompare(b.data || ""));
   document.getElementById("sheet-content").innerHTML = `
@@ -850,7 +850,7 @@ function drawCategoriaChart(despesasList) {
 function drawParcelasChart(mk) {
   destroyChart("parc");
   const keys = next6MonthKeys(mk);
-  const vals = keys.map((k) => sum(state.lancamentos.filter((l) => monthKey(l.data) === k && l.forma_entrada === "parcelado")));
+  const vals = keys.map((k) => sum(state.lancamentos.filter((l) => monthKey(l.data) === k && l.forma_entrada === "parcelado" && l.tipo === "despesa")));
   const ctx = document.getElementById("chart-parc");
   if (!ctx) return;
   state.charts.parc = new Chart(ctx, {
@@ -1344,6 +1344,18 @@ function fotoModeHTML() {
   `;
 }
 
+function parcelaCopy(tipo) {
+  if (tipo === "receita") {
+    return {
+      label: "É uma receita parcelada (vou receber em várias vezes)?",
+      helper: "O valor acima é o total a receber; cada parcela mensal será lançada automaticamente como receita a partir da data escolhida — assim os meses seguintes já aparecem com esse ganho confirmado.",
+    };
+  }
+  return {
+    label: "É uma compra parcelada?",
+    helper: "O valor acima é o total da compra; cada parcela mensal será lançada automaticamente a partir da data escolhida.",
+  };
+}
 function manualFormHTML(prefill) {
   const p = prefill || {};
   const tipo = p.tipo || "despesa";
@@ -1380,12 +1392,12 @@ function manualFormHTML(prefill) {
 
     ${state.editingId ? "" : `
     <label style="display:flex; align-items:center; gap:8px; margin-top:14px; font-size:0.9rem;">
-      <input type="checkbox" id="f-parcelado" ${isParcelaPrefill?"checked":""} /> É uma compra parcelada?
+      <input type="checkbox" id="f-parcelado" ${isParcelaPrefill?"checked":""} /> <span id="f-parcelado-label">${parcelaCopy(tipo).label}</span>
     </label>
     <div id="parcela-fields" class="${isParcelaPrefill?"":"hidden"}">
       <label class="field-label">Número de parcelas</label>
       <input type="number" min="2" max="60" id="f-num-parcelas" value="${numParcelasPrefill}" />
-      <p class="muted">O valor acima é o total da compra; cada parcela mensal será lançada automaticamente a partir da data escolhida.</p>
+      <p class="muted" id="f-parcelado-helper">${parcelaCopy(tipo).helper}</p>
     </div>`}
 
     <button class="btn btn-primary" id="btn-save-lanc" style="margin-top:16px;">${state.editingId ? "Salvar alterações" : "Lançar"}</button>
@@ -1411,6 +1423,11 @@ function wireManualForm(prefill) {
       document.querySelectorAll("#tipo-toggle button").forEach((x) => x.classList.remove("active","despesa","receita"));
       b.classList.add("active", b.dataset.tipo);
       applyTipoFilter(b.dataset.tipo);
+      const copy = parcelaCopy(b.dataset.tipo);
+      const labelEl = document.getElementById("f-parcelado-label");
+      const helperEl = document.getElementById("f-parcelado-helper");
+      if (labelEl) labelEl.textContent = copy.label;
+      if (helperEl) helperEl.textContent = copy.helper;
     });
   });
   applyTipoFilter((prefill && prefill.tipo) || "despesa");
@@ -1477,7 +1494,7 @@ async function saveManualEntry(prefill) {
         const parcelaValor = isLast ? Math.round((valor - acumulado) * 100) / 100 : base;
         acumulado += parcelaValor;
         items.push({
-          tipo: "despesa", valor: parcelaValor, data: addMonthsISO(data, i),
+          tipo, valor: parcelaValor, data: addMonthsISO(data, i),
           macrocategoria, microcategoria, descricao: `${descricao || macrocategoria} (parcela ${i+1}/${numParcelas})`,
           conta, forma_entrada: "parcelado", parcelamento_id: parcelamento.id, comprovante_url: prefill?.comprovante_url || "",
         });
@@ -1485,7 +1502,7 @@ async function saveManualEntry(prefill) {
       const created = await apiBulkCreate("Lancamentos", items);
       state.lancamentos = state.lancamentos.concat(created);
       state.parcelamentos = state.parcelamentos.concat([parcelamento]);
-      toast(`Parcelamento lançado em ${numParcelas}x.`);
+      toast(tipo === "receita" ? `Receita parcelada lançada em ${numParcelas}x.` : `Parcelamento lançado em ${numParcelas}x.`);
     } else {
       const created = await apiCreate("Lancamentos", {
         tipo, valor, data, macrocategoria, microcategoria, descricao, conta,
@@ -1518,10 +1535,12 @@ Data de hoje: ${todayISO()}
 Responda APENAS com um objeto JSON, sem markdown e sem texto extra, no formato exato:
 {"tipo":"despesa|receita","valor":numero,"macrocategoria":"...","microcategoria":"...","data":"AAAA-MM-DD","descricao":"texto curto","parcelado":true|false,"num_parcelas":numero,"confianca":"alta|media|baixa"}
 Se a data não for mencionada, use a data de hoje. "valor" deve ser apenas o número, sem símbolo de moeda.
-Regras para compras parceladas (ex.: "comprei uma TV em 10 prestações de 250 reais", "parcelei em 5x de 100", "paguei em 3 vezes"):
-- "parcelado" deve ser true e "num_parcelas" deve ser a quantidade de parcelas mencionada.
-- "valor" deve ser sempre o valor TOTAL da compra. Se a pessoa falar o valor de cada parcela (ex.: "10 prestações de 250 reais"), multiplique: valor = num_parcelas × valor_da_parcela (nesse exemplo, valor = 2500). Se a pessoa já falar o valor total (ex.: "parcelei uma compra de 2500 em 10x"), use esse total direto.
-- Se a compra não for parcelada, "parcelado" deve ser false e "num_parcelas" deve ser 1.`;
+Regras para lançamentos parcelados/fracionados, que valem tanto para despesas (compras parceladas) quanto para receitas (recebimentos fracionados em vários meses):
+- Despesa parcelada, ex.: "comprei uma TV em 10 prestações de 250 reais", "parcelei em 5x de 100", "paguei em 3 vezes" → tipo="despesa", parcelado=true.
+- Receita parcelada/fracionada, ex.: "vendi algo e vou receber 100 reais por mês nos próximos 10 meses", "vou receber esse valor em 5 parcelas", "recebimento fracionado em 4x" → tipo="receita", parcelado=true.
+- "num_parcelas" deve ser a quantidade de parcelas/meses mencionada.
+- "valor" deve ser sempre o valor TOTAL (soma de todas as parcelas), nunca o valor de uma parcela isolada. Se a pessoa falar o valor de cada parcela (ex.: "10 prestações de 250 reais" ou "100 reais por mês por 10 meses"), multiplique: valor = num_parcelas × valor_de_cada_parcela (nesses exemplos, valor = 2500 e 1000). Se a pessoa já falar o valor total (ex.: "parcelei uma compra de 2500 em 10x"), use esse total direto.
+- Se não for parcelado/fracionado, "parcelado" deve ser false e "num_parcelas" deve ser 1.`;
 }
 function parseAIJson(text) {
   try { return JSON.parse(text.trim()); } catch (e) {}
