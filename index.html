@@ -1,0 +1,1662 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Gestor Financeiro Pessoal</title>
+<meta name="description" content="Controle pessoal de receitas, despesas e parcelamentos" />
+<link rel="manifest" href="manifest.json" />
+<link rel="icon" href="icon-192.png" />
+<link rel="apple-touch-icon" href="apple-touch-icon.png" />
+<meta name="theme-color" content="#2a78d6" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="Finanças" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.1/chart.umd.min.js"></script>
+<style>
+  :root {
+    color-scheme: light;
+    --surface-0: #f9f9f7;
+    --surface-1: #fcfcfb;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --muted: #898781;
+    --gridline: #e1e0d9;
+    --baseline: #c3c2b7;
+    --border: rgba(11,11,11,0.10);
+    --series-1: #2a78d6; /* Alimentação */
+    --series-2: #eb6834; /* Saúde */
+    --series-3: #1baf7a; /* Transporte/Automóvel */
+    --series-4: #eda100; /* Moradia */
+    --series-5: #e87ba4; /* Sítio */
+    --series-6: #008300; /* Lazer/Festas */
+    --series-7: #4a3aa7; /* Educação */
+    --series-8: #e34948; /* Outros */
+    --good: #2a78d6; /* entradas — mesmo azul da marca, no lugar do verde tradicional */
+    --critical: #eb6834; /* saídas — laranja vívido, no lugar do vermelho tradicional */
+    --radius-lg: 18px;
+    --radius-md: 12px;
+    --radius-sm: 9px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --surface-0: #0d0d0d;
+      --surface-1: #1a1a19;
+      --text-primary: #ffffff;
+      --text-secondary: #c3c2b7;
+      --muted: #898781;
+      --gridline: #2c2c2a;
+      --baseline: #383835;
+      --border: rgba(255,255,255,0.10);
+      --series-1: #3987e5;
+      --series-2: #d95926;
+      --series-3: #199e70;
+      --series-4: #c98500;
+      --series-5: #d55181;
+      --series-6: #008300;
+      --series-7: #9085e9;
+      --series-8: #e66767;
+      --good: #3987e5;
+      --critical: #d95926;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-0: #0d0d0d;
+    --surface-1: #1a1a19;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --muted: #898781;
+    --gridline: #2c2c2a;
+    --baseline: #383835;
+    --border: rgba(255,255,255,0.10);
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --series-5: #d55181;
+    --series-6: #008300;
+    --series-7: #9085e9;
+    --series-8: #e66767;
+    --good: #3987e5;
+    --critical: #d95926;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--surface-0);
+    color: var(--text-primary);
+    min-height: 100dvh;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #app {
+    max-width: 480px;
+    margin: 0 auto;
+    min-height: 100dvh;
+    position: relative;
+    padding-bottom: calc(84px + env(safe-area-inset-bottom));
+  }
+
+  .topbar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    background: var(--surface-0);
+    border-bottom: 1px solid var(--gridline);
+    padding: 14px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .topbar h1 { font-size: 1.1rem; font-weight: 700; margin: 0; }
+  #topbar-actions { display: flex; align-items: center; gap: 4px; }
+  .topbar .month-nav { display: flex; align-items: center; gap: 8px; }
+  .icon-btn {
+    background: none; border: none; color: var(--text-primary);
+    font-size: 1.2rem; cursor: pointer; padding: 6px 10px; border-radius: 999px;
+    line-height: 1;
+  }
+  .icon-btn:active { background: var(--gridline); }
+
+  main#view-root { padding: 14px 16px 8px; }
+
+  .card {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 16px;
+    margin-bottom: 12px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  }
+  .card h2 { font-size: 0.95rem; font-weight: 600; margin: 0 0 10px; color: var(--text-primary); }
+  .muted { color: var(--muted); font-size: 0.82rem; }
+  .secondary { color: var(--text-secondary); }
+
+  .stat-row { display: flex; gap: 10px; margin-bottom: 12px; }
+  .stat-tile { flex: 1; background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 14px; }
+  .stat-tile .label { font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 4px; }
+  .stat-tile .value { font-size: 1.3rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .stat-tile.hero .value { font-size: 1.7rem; }
+  .value.positive { color: var(--good); }
+  .value.negative { color: var(--critical); }
+
+  .chart-wrap { position: relative; width: 100%; height: 220px; }
+  .chart-wrap.donut { height: 240px; }
+
+  .empty-state { text-align: center; padding: 28px 12px; color: var(--text-secondary); }
+  .empty-state .big { font-size: 2rem; margin-bottom: 8px; }
+
+  .list-item { display: flex; align-items: center; justify-content: space-between; padding: 11px 0; border-bottom: 1px solid var(--gridline); gap: 10px; }
+  .list-item:last-child { border-bottom: none; }
+  .li-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  .li-text { min-width: 0; }
+  .li-text .cat { font-size: 0.92rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .li-text .sub { font-size: 0.76rem; color: var(--muted); }
+  .li-right { text-align: right; flex: none; display: flex; align-items: center; gap: 8px; }
+  .li-right .amount { font-weight: 700; font-variant-numeric: tabular-nums; font-size: 0.94rem; }
+  .li-actions { display: none; gap: 4px; }
+  .list-item:hover .li-actions { display: flex; }
+  .li-actions button { background: none; border: none; color: var(--muted); font-size: 0.95rem; cursor: pointer; padding: 4px; }
+
+  .filters-row { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+  select, input[type="text"], input[type="number"], input[type="date"], input[type="password"], input[type="url"] {
+    font-family: inherit;
+    font-size: 0.95rem;
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--gridline);
+    background: var(--surface-0);
+    color: var(--text-primary);
+    width: 100%;
+  }
+  label.field-label { display: block; font-size: 0.78rem; color: var(--text-secondary); margin: 10px 0 5px; }
+  .field { margin-bottom: 2px; }
+
+  .segmented { display: flex; background: var(--surface-0); border: 1px solid var(--gridline); border-radius: 999px; padding: 3px; }
+  .segmented button {
+    flex: 1; border: none; background: none; padding: 9px 6px; border-radius: 999px;
+    font-size: 0.86rem; font-weight: 600; color: var(--text-secondary); cursor: pointer;
+  }
+  .segmented button.active { background: var(--series-1); color: #fff; }
+  .segmented.type-toggle button.active.despesa { background: var(--critical); color: #fff; }
+  .segmented.type-toggle button.active.receita { background: var(--good); color: #fff; }
+
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    border: none; border-radius: var(--radius-sm); padding: 11px 16px;
+    font-size: 0.92rem; font-weight: 600; cursor: pointer; width: 100%;
+  }
+  .btn-primary { background: var(--series-1); color: #fff; }
+  .btn-outline { background: none; border: 1px solid var(--gridline); color: var(--text-primary); }
+  .btn-ghost { background: var(--surface-0); color: var(--text-secondary); }
+  .btn[disabled] { opacity: 0.5; pointer-events: none; }
+
+  .bottomnav {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 25;
+    max-width: 480px; margin: 0 auto;
+    background: var(--surface-1); border-top: 1px solid var(--gridline);
+    display: flex; justify-content: space-around;
+    padding: 8px 4px calc(8px + env(safe-area-inset-bottom));
+  }
+  .nav-btn { background: none; border: none; display: flex; flex-direction: column; align-items: center; gap: 2px; color: var(--muted); font-size: 0.58rem; cursor: pointer; padding: 4px 1px; flex: 1; min-width: 0; }
+  .nav-btn .ic { font-size: 1.4rem; }
+  .nav-btn.active { color: var(--series-1); }
+
+  .fab {
+    position: fixed; right: max(20px, calc((100% - 480px)/2 + 20px)); bottom: calc(86px + env(safe-area-inset-bottom));
+    width: 58px; height: 58px; border-radius: 50%; background: var(--series-1); color: #fff;
+    border: none; font-size: 30px; line-height: 1; box-shadow: 0 4px 14px rgba(0,0,0,0.25); cursor: pointer; z-index: 26;
+  }
+
+  .sheet-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 50; display: flex; align-items: flex-end; }
+  .sheet-overlay.hidden { display: none; }
+  .sheet { width: 100%; max-height: 90vh; overflow-y: auto; background: var(--surface-1); border-radius: 20px 20px 0 0; padding: 16px 16px calc(28px + env(safe-area-inset-bottom)); max-width: 480px; margin: 0 auto; }
+  .sheet-handle { width: 36px; height: 4px; background: var(--gridline); border-radius: 999px; margin: 0 auto 12px; }
+  .sheet-title { font-weight: 700; font-size: 1.05rem; margin-bottom: 12px; }
+
+  .chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px; background: var(--surface-0); border: 1px solid var(--gridline); font-size: 0.82rem; margin: 0 6px 6px 0; }
+  .chip button { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 0.85rem; padding: 0; }
+  .macro-group { margin-bottom: 14px; }
+  .macro-group .macro-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .macro-group .macro-head .name { font-weight: 700; font-size: 0.92rem; display: flex; align-items: center; gap: 8px; }
+
+  .banner { border-radius: var(--radius-md); padding: 12px 14px; font-size: 0.86rem; margin-bottom: 12px; }
+  .banner.info { background: color-mix(in srgb, var(--series-1) 12%, var(--surface-1)); border: 1px solid var(--series-1); }
+  .banner.warn { background: color-mix(in srgb, var(--series-4) 16%, var(--surface-1)); border: 1px solid var(--series-4); }
+
+  .toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(96px + env(safe-area-inset-bottom)); background: var(--text-primary); color: var(--surface-1); padding: 10px 18px; border-radius: 999px; font-size: 0.85rem; z-index: 80; box-shadow: 0 4px 14px rgba(0,0,0,0.25); }
+  .toast.hidden { display: none; }
+
+  .rec-indicator { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 30px 0; }
+  .rec-dot { width: 14px; height: 14px; border-radius: 50%; background: var(--critical); animation: pulse 1s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:0.3;} }
+
+  .legend-row { display: flex; flex-wrap: wrap; gap: 10px 14px; margin-top: 10px; font-size: 0.78rem; }
+  .legend-row .item { display: flex; align-items: center; gap: 6px; color: var(--text-secondary); }
+  .legend-row .sw { width: 9px; height: 9px; border-radius: 50%; }
+
+  a { color: var(--series-1); }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header class="topbar" id="topbar">
+    <h1 id="topbar-title">Painel</h1>
+    <div id="topbar-actions"></div>
+  </header>
+
+  <main id="view-root"></main>
+
+  <button class="fab" id="fab">+</button>
+
+  <nav class="bottomnav">
+    <button class="nav-btn active" data-tab="painel-mes"><span class="ic">🗓️</span>Mês</button>
+    <button class="nav-btn" data-tab="painel-geral"><span class="ic">📈</span>Geral</button>
+    <button class="nav-btn" data-tab="lancamentos"><span class="ic">📋</span>Lançamentos</button>
+    <button class="nav-btn" data-tab="investimentos"><span class="ic">🏦</span>Investim.</button>
+    <button class="nav-btn" data-tab="categorias"><span class="ic">🏷️</span>Categorias</button>
+    <button class="nav-btn" data-tab="ajustes"><span class="ic">⚙️</span>Ajustes</button>
+  </nav>
+</div>
+
+<div class="sheet-overlay hidden" id="sheet-overlay">
+  <div class="sheet" id="sheet">
+    <div class="sheet-handle"></div>
+    <div id="sheet-content"></div>
+  </div>
+</div>
+
+<div class="toast hidden" id="toast"></div>
+
+<script>
+/* =========================================================
+   Gestor Financeiro Pessoal — app.js
+   Vanilla JS, sem build step. Único backend: Google Apps
+   Script (Code.gs) publicado como Web App sobre uma planilha
+   Google que funciona como banco de dados.
+   ========================================================= */
+
+const LS_CONFIG = "gf_config_v1";
+const LS_CACHE = "gf_cache_v1";
+
+const MACRO_COLOR_ORDER = [
+  "Alimentação", "Saúde", "Transporte/Automóvel", "Moradia",
+  "Sítio", "Lazer/Festas", "Educação", "Outros"
+];
+
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+function macroColor(macro) {
+  if (macro === "Receita") return cssVar("--series-1"); // mesma cor do "Receitas" no gráfico
+  const idx = MACRO_COLOR_ORDER.indexOf(macro);
+  const slot = idx === -1 ? 8 : idx + 1;
+  return cssVar("--series-" + slot);
+}
+
+/* ---------- estado ---------- */
+const state = {
+  config: loadConfig(),
+  lancamentos: [],
+  categorias: [],
+  parcelamentos: [],
+  investimentos: [],
+  loaded: false,
+  loading: false,
+  lastError: null,
+  currentTab: "painel-mes",
+  dashboardMonth: currentMonthKey(),
+  painelView: "mes",
+  geralPeriodType: "trimestre",
+  geralYear: currentYear(),
+  geralQuarter: currentQuarter(),
+  filter: { month: currentMonthKey(), macro: "" },
+  charts: {},
+  sheetMode: "manual",
+  editingId: null,
+  mediaRecorder: null,
+  audioChunks: [],
+  recognizer: null,
+};
+
+/* ---------- config / storage ---------- */
+function loadConfig() {
+  try {
+    return Object.assign({
+      sheetsUrl: "https://script.google.com/macros/s/AKfycby51UP4gaTR6adrs1ufWxTl0MwKjdeE87FUZiMo-88H4GbL69n65tTRYd-YOvvY4xpk/exec",
+      aiProvider: "none",
+      aiApiKey: "",
+      aiModelText: "gpt-4o-mini",
+      aiModelVision: "gpt-4o-mini",
+      aiModelAudio: "whisper-1",
+    }, JSON.parse(localStorage.getItem(LS_CONFIG) || "{}"));
+  } catch (e) { return { sheetsUrl: "", aiProvider: "none", aiApiKey: "", aiModelText: "gpt-4o-mini", aiModelVision: "gpt-4o-mini", aiModelAudio: "whisper-1" }; }
+}
+function saveConfig() {
+  localStorage.setItem(LS_CONFIG, JSON.stringify(state.config));
+}
+function loadCache() {
+  try { return JSON.parse(localStorage.getItem(LS_CACHE) || "null"); } catch (e) { return null; }
+}
+function saveCache() {
+  try {
+    localStorage.setItem(LS_CACHE, JSON.stringify({
+      lancamentos: state.lancamentos, categorias: state.categorias, parcelamentos: state.parcelamentos,
+      investimentos: state.investimentos
+    }));
+  } catch (e) { /* quota — ignora */ }
+}
+
+/* ---------- utils de data/valor ---------- */
+function todayISO() {
+  const d = new Date();
+  return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+}
+function currentMonthKey() { return todayISO().slice(0,7); }
+function currentYear() { return new Date().getFullYear(); }
+function currentQuarter() { return Math.ceil((new Date().getMonth()+1)/3); }
+function quarterMonths(q) { const start = (q-1)*3+1; return [start, start+1, start+2]; }
+function quarterLabel(year, q) { return `${q}º trimestre de ${year}`; }
+function shiftQuarter(year, q, n) {
+  let idx = year*4 + (q-1) + n;
+  const newYear = Math.floor(idx/4);
+  let newQ = idx % 4;
+  if (newQ < 0) newQ += 4;
+  return { year: newYear, quarter: newQ+1 };
+}
+function periodoMonthKeys() {
+  if (state.geralPeriodType === "ano") {
+    return Array.from({length:12}, (_,i) => `${state.geralYear}-${String(i+1).padStart(2,"0")}`);
+  }
+  return quarterMonths(state.geralQuarter).map((m) => `${state.geralYear}-${String(m).padStart(2,"0")}`);
+}
+function lancamentosNoPeriodoGeral() {
+  const keys = new Set(periodoMonthKeys());
+  return state.lancamentos.filter((l) => keys.has(monthKey(l.data)));
+}
+function monthKey(dateStr) { return (dateStr || "").slice(0,7); }
+function parseISODate(dateStr) {
+  const [y,m,d] = (dateStr || todayISO()).split("-").map(Number);
+  return new Date(y, (m||1)-1, d||1);
+}
+function toISODate(d) {
+  return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+}
+function addMonthsISO(dateStr, n) {
+  const d = parseISODate(dateStr);
+  const day = d.getDate();
+  d.setDate(1);
+  d.setMonth(d.getMonth() + n);
+  const daysInMonth = new Date(d.getFullYear(), d.getMonth()+1, 0).getDate();
+  d.setDate(Math.min(day, daysInMonth));
+  return toISODate(d);
+}
+function monthLabel(key) {
+  const [y,m] = key.split("-").map(Number);
+  const d = new Date(y, m-1, 1);
+  const label = d.toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+function shiftMonthKey(key, n) {
+  const [y,m] = key.split("-").map(Number);
+  const d = new Date(y, m-1+n, 1);
+  return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0");
+}
+function last6MonthKeys(baseKey) {
+  const keys = [];
+  for (let i = 5; i >= 0; i--) keys.push(shiftMonthKey(baseKey, -i));
+  return keys;
+}
+function next6MonthKeys(baseKey) {
+  const keys = [];
+  for (let i = 0; i < 6; i++) keys.push(shiftMonthKey(baseKey, i));
+  return keys;
+}
+function formatBRL(v) {
+  const n = Number(v) || 0;
+  return n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+function parseValorInput(str) {
+  if (typeof str === "number") return str;
+  let s = String(str || "0").trim();
+  s = s.replace(/[^\d,.-]/g, "");
+  if (s.includes(",") && s.includes(".")) {
+    s = s.replace(/\./g, "").replace(",", ".");
+  } else if (s.includes(",")) {
+    s = s.replace(",", ".");
+  }
+  const n = parseFloat(s);
+  return isNaN(n) ? 0 : n;
+}
+function shortDate(dateStr) {
+  const d = parseISODate(dateStr);
+  return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" });
+}
+function uid() {
+  return "id-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2,8);
+}
+
+/* ---------- toast ---------- */
+let toastTimer = null;
+function toast(msg) {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.classList.remove("hidden");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.add("hidden"), 2600);
+}
+
+/* ---------- API (Google Apps Script) ---------- */
+function apiUrl() { return (state.config.sheetsUrl || "").trim(); }
+async function apiGet(params) {
+  const url = apiUrl();
+  if (!url) throw new Error("Configure a URL do Apps Script em Ajustes.");
+  const qs = new URLSearchParams(params).toString();
+  const res = await fetch(url + (url.includes("?") ? "&" : "?") + qs, { method: "GET" });
+  const json = await res.json();
+  if (!json.ok) throw new Error(json.error || "Erro na planilha.");
+  return json.data;
+}
+async function apiPost(body) {
+  const url = apiUrl();
+  if (!url) throw new Error("Configure a URL do Apps Script em Ajustes.");
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain;charset=utf-8" },
+    body: JSON.stringify(body),
+  });
+  const json = await res.json();
+  if (!json.ok) throw new Error(json.error || "Erro na planilha.");
+  return json.data;
+}
+async function apiListAll() { return apiGet({ action: "listall" }); }
+async function apiBootstrap() { return apiGet({ action: "bootstrap" }); }
+async function apiCreate(sheet, data) { return apiPost({ action: "create", sheet, data }); }
+async function apiBulkCreate(sheet, items) { return apiPost({ action: "bulkcreate", sheet, items }); }
+async function apiUpdate(sheet, id, data) { return apiPost({ action: "update", sheet, id, data }); }
+async function apiDelete(sheet, id) { return apiPost({ action: "delete", sheet, id }); }
+
+async function refreshData(showToast) {
+  if (!apiUrl()) return;
+  state.loading = true;
+  renderCurrentTab();
+  try {
+    const data = await apiListAll();
+    state.lancamentos = data.Lancamentos || [];
+    state.categorias = data.Categorias || [];
+    state.parcelamentos = data.Parcelamentos || [];
+    state.investimentos = data.Investimentos || [];
+    state.loaded = true;
+    state.lastError = null;
+    saveCache();
+    if (showToast) toast("Dados atualizados.");
+  } catch (err) {
+    state.lastError = String(err.message || err);
+    toast("Não consegui atualizar: " + state.lastError);
+  } finally {
+    state.loading = false;
+    renderCurrentTab();
+  }
+}
+
+/* ---------- shell / navegação ---------- */
+document.querySelectorAll(".nav-btn").forEach((btn) => {
+  btn.addEventListener("click", () => switchTab(btn.dataset.tab));
+});
+document.getElementById("fab").addEventListener("click", () => openSheet());
+
+function switchTab(tab) {
+  state.currentTab = tab;
+  if (tab === "painel-mes") state.painelView = "mes";
+  if (tab === "painel-geral") state.painelView = "geral";
+  document.querySelectorAll(".nav-btn").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
+  const titles = { "painel-mes": "Painel — Mês", "painel-geral": "Painel — Geral", lancamentos: "Lançamentos", investimentos: "Investimentos", categorias: "Categorias", ajustes: "Ajustes" };
+  document.getElementById("topbar-title").textContent = titles[tab];
+  document.getElementById("fab").classList.toggle("hidden", tab === "categorias" || tab === "ajustes" || tab === "investimentos");
+  renderCurrentTab();
+}
+function renderCurrentTab() {
+  const root = document.getElementById("view-root");
+  const actions = document.getElementById("topbar-actions");
+  actions.innerHTML = "";
+  if (!apiUrl() && state.currentTab !== "ajustes") {
+    root.innerHTML = onboardingHTML();
+    document.getElementById("go-ajustes-btn")?.addEventListener("click", () => switchTab("ajustes"));
+    return;
+  }
+  if (state.currentTab === "painel-mes" || state.currentTab === "painel-geral") return renderPainel(root, actions);
+  if (state.currentTab === "lancamentos") return renderLancamentos(root, actions);
+  if (state.currentTab === "investimentos") return renderInvestimentos(root, actions);
+  if (state.currentTab === "categorias") return renderCategorias(root, actions);
+  if (state.currentTab === "ajustes") return renderAjustes(root, actions);
+}
+function onboardingHTML() {
+  return `
+    <div class="card">
+      <h2>Bem-vindo 👋</h2>
+      <p class="secondary" style="font-size:0.9rem; line-height:1.5;">
+        Para começar, cole em <strong>Ajustes</strong> a URL do seu Google Apps Script —
+        é ele quem guarda seus lançamentos numa planilha Google.
+      </p>
+      <button class="btn btn-primary" id="go-ajustes-btn">Ir para Ajustes</button>
+    </div>`;
+}
+
+/* ---------- PAINEL ---------- */
+function renderPainel(root, actions) {
+  const isGeral = state.painelView === "geral";
+
+  actions.innerHTML = `
+    <button class="icon-btn" id="btn-refresh" title="Atualizar">⟳</button>
+    <div class="month-nav">
+      <button class="icon-btn" id="dash-prev">‹</button>
+      <span class="secondary" id="dash-month-label" style="font-size:0.85rem; min-width:118px; text-align:center;"></span>
+      <button class="icon-btn" id="dash-next">›</button>
+    </div>`;
+  document.getElementById("btn-refresh").onclick = () => refreshData(true);
+  document.getElementById("dash-month-label").textContent = isGeral
+    ? (state.geralPeriodType === "ano" ? String(state.geralYear) : quarterLabel(state.geralYear, state.geralQuarter).replace("trimestre de ", "trim. "))
+    : monthLabel(state.dashboardMonth);
+  document.getElementById("dash-prev").onclick = () => {
+    if (isGeral) {
+      if (state.geralPeriodType === "ano") state.geralYear -= 1;
+      else { const s = shiftQuarter(state.geralYear, state.geralQuarter, -1); state.geralYear = s.year; state.geralQuarter = s.quarter; }
+    } else {
+      state.dashboardMonth = shiftMonthKey(state.dashboardMonth, -1);
+    }
+    renderPainel(root, actions);
+  };
+  document.getElementById("dash-next").onclick = () => {
+    if (isGeral) {
+      if (state.geralPeriodType === "ano") state.geralYear += 1;
+      else { const s = shiftQuarter(state.geralYear, state.geralQuarter, 1); state.geralYear = s.year; state.geralQuarter = s.quarter; }
+    } else {
+      state.dashboardMonth = shiftMonthKey(state.dashboardMonth, 1);
+    }
+    renderPainel(root, actions);
+  };
+
+  if (isGeral) {
+    renderPainelGeral(root);
+  } else {
+    renderPainelMes(root);
+  }
+}
+
+function renderPainelMes(root) {
+  const mk = state.dashboardMonth;
+  const doMes = state.lancamentos.filter((l) => monthKey(l.data) === mk);
+  const receitas = sum(doMes.filter((l) => l.tipo === "receita"));
+  const despesas = sum(doMes.filter((l) => l.tipo === "despesa"));
+  const saldo = receitas - despesas;
+
+  const parcelasAbertas = state.lancamentos.filter((l) => l.forma_entrada === "parcelado" && l.data >= todayISO());
+  const dividaFutura = sum(parcelasAbertas);
+  const comprasAbertas = new Set(parcelasAbertas.map((l) => l.parcelamento_id)).size;
+
+  root.innerHTML = `
+    ${state.loading ? `<div class="muted" style="margin-bottom:8px;">Atualizando…</div>` : ""}
+    ${state.lastError ? `<div class="banner warn">${escapeHTML(state.lastError)}</div>` : ""}
+    <div class="card stat-tile hero">
+      <div class="label">Saldo do mês</div>
+      <div class="value ${saldo >= 0 ? "positive" : "negative"}">${formatBRL(saldo)}</div>
+    </div>
+    <div class="stat-row">
+      <div class="stat-tile"><div class="label">Receitas</div><div class="value positive">${formatBRL(receitas)}</div></div>
+      <div class="stat-tile"><div class="label">Despesas</div><div class="value negative">${formatBRL(despesas)}</div></div>
+    </div>
+    ${dividaFutura > 0 ? `
+    <div class="card stat-tile">
+      <div class="label">Dívida futura em aberto (parcelas)</div>
+      <div class="value">${formatBRL(dividaFutura)}</div>
+      <div class="muted" style="margin-top:2px;">${parcelasAbertas.length} parcela${parcelasAbertas.length===1?"":"s"} em ${comprasAbertas} compra${comprasAbertas===1?"":"s"}</div>
+    </div>` : ""}
+
+    <div class="card">
+      <h2>Receitas x despesas — últimos 6 meses</h2>
+      <div class="chart-wrap"><canvas id="chart-rd"></canvas></div>
+    </div>
+
+    <div class="card">
+      <h2>Gastos por categoria — ${monthLabel(mk).split(" ")[0]}</h2>
+      ${despesas > 0
+        ? `<div class="chart-wrap donut"><canvas id="chart-cat"></canvas></div>`
+        : `<div class="empty-state"><div class="big">🗂️</div>Sem despesas neste mês ainda.</div>`}
+    </div>
+
+    <div class="card">
+      <h2>Parcelas futuras comprometidas</h2>
+      <div class="chart-wrap"><canvas id="chart-parc"></canvas></div>
+    </div>
+
+    <div class="card">
+      <h2>Lançamentos recentes</h2>
+      <div id="recent-list">${renderList(state.lancamentos.slice().sort(byDataDesc).slice(0, 8))}</div>
+    </div>
+  `;
+  wireListActions(root);
+  drawReceitasDespesasChart(last6MonthKeys(mk));
+  if (despesas > 0) drawCategoriaChart(doMes.filter((l) => l.tipo === "despesa"));
+  drawParcelasChart(mk);
+}
+
+function renderPainelGeral(root) {
+  const periodo = lancamentosNoPeriodoGeral();
+  const receitas = sum(periodo.filter((l) => l.tipo === "receita"));
+  const despesas = sum(periodo.filter((l) => l.tipo === "despesa"));
+  const saldo = receitas - despesas;
+  const periodoLabel = state.geralPeriodType === "ano" ? String(state.geralYear) : quarterLabel(state.geralYear, state.geralQuarter);
+
+  root.innerHTML = `
+    ${state.loading ? `<div class="muted" style="margin-bottom:8px;">Atualizando…</div>` : ""}
+    ${state.lastError ? `<div class="banner warn">${escapeHTML(state.lastError)}</div>` : ""}
+    <div class="segmented" id="geral-period-toggle" style="margin-bottom:14px;">
+      <button data-period="trimestre" class="${state.geralPeriodType==="trimestre"?"active":""}">Trimestre</button>
+      <button data-period="ano" class="${state.geralPeriodType==="ano"?"active":""}">Ano</button>
+    </div>
+
+    <div class="card stat-tile hero">
+      <div class="label">Saldo — ${escapeHTML(periodoLabel)}</div>
+      <div class="value ${saldo >= 0 ? "positive" : "negative"}">${formatBRL(saldo)}</div>
+    </div>
+    <div class="stat-row">
+      <div class="stat-tile"><div class="label">Total de receitas</div><div class="value positive">${formatBRL(receitas)}</div></div>
+      <div class="stat-tile"><div class="label">Total de despesas</div><div class="value negative">${formatBRL(despesas)}</div></div>
+    </div>
+
+    <div class="card">
+      <h2>Receitas x despesas por mês</h2>
+      <div class="chart-wrap"><canvas id="chart-rd"></canvas></div>
+    </div>
+
+    <div class="card">
+      <h2>Gastos por categoria — ${escapeHTML(periodoLabel)}</h2>
+      ${despesas > 0
+        ? `<div class="chart-wrap donut"><canvas id="chart-cat"></canvas></div>`
+        : `<div class="empty-state"><div class="big">🗂️</div>Sem despesas neste período.</div>`}
+    </div>
+  `;
+  root.querySelectorAll("#geral-period-toggle button").forEach((b) => {
+    b.addEventListener("click", () => { state.geralPeriodType = b.dataset.period; renderCurrentTab(); });
+  });
+  drawReceitasDespesasChart(periodoMonthKeys());
+  if (despesas > 0) drawCategoriaChart(periodo.filter((l) => l.tipo === "despesa"));
+}
+
+function sum(list) { return list.reduce((acc, l) => acc + (Number(l.valor) || 0), 0); }
+function byDataDesc(a, b) { return (b.data || "").localeCompare(a.data || "") || (b.criado_em||"").localeCompare(a.criado_em||""); }
+
+function destroyChart(key) {
+  if (state.charts[key]) { state.charts[key].destroy(); delete state.charts[key]; }
+}
+function baseChartFont() {
+  return { family: "system-ui, -apple-system, sans-serif", size: 11 };
+}
+function drawReceitasDespesasChart(keys) {
+  destroyChart("rd");
+  const receitas = keys.map((k) => sum(state.lancamentos.filter((l) => monthKey(l.data) === k && l.tipo === "receita")));
+  const despesas = keys.map((k) => sum(state.lancamentos.filter((l) => monthKey(l.data) === k && l.tipo === "despesa")));
+  const ctx = document.getElementById("chart-rd");
+  if (!ctx) return;
+
+  // desenha o % que a despesa representa sobre a receita do mesmo mês, acima da barra de despesas
+  const pctSobreReceitaPlugin = {
+    id: "pctSobreReceita",
+    afterDatasetsDraw(chart) {
+      const meta = chart.getDatasetMeta(1); // dataset "Despesas"
+      if (!meta || meta.hidden) return;
+      const c = chart.ctx;
+      c.save();
+      c.font = "600 10px system-ui, -apple-system, sans-serif";
+      c.fillStyle = cssVar("--critical");
+      c.textAlign = "center";
+      meta.data.forEach((bar, i) => {
+        const rec = receitas[i], desp = despesas[i];
+        if (!desp || rec <= 0) return;
+        const pct = Math.round((desp / rec) * 100);
+        c.fillText(pct + "%", bar.x, bar.y - 6);
+      });
+      c.restore();
+    },
+  };
+
+  state.charts.rd = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels: keys.map((k) => monthLabel(k).slice(0,3)),
+      datasets: [
+        { label: "Receitas", data: receitas, backgroundColor: cssVar("--good"), borderRadius: 4, maxBarThickness: 22 },
+        { label: "Despesas", data: despesas, backgroundColor: cssVar("--critical"), borderRadius: 4, maxBarThickness: 22 },
+      ],
+    },
+    options: Object.assign({}, chartBaseOptions({ legend: true }), {
+      layout: { padding: { top: 16 } },
+      onClick: (evt, _els, chart) => {
+        const points = chart.getElementsAtEventForMode(evt, "nearest", { intersect: true }, true);
+        if (!points.length) return;
+        const { datasetIndex, index } = points[0];
+        showLancamentosDoMes(keys[index], datasetIndex === 0 ? "receita" : "despesa");
+      },
+      onHover: (evt, els, chart) => { chart.canvas.style.cursor = els.length ? "pointer" : "default"; },
+    }),
+    plugins: [pctSobreReceitaPlugin],
+  });
+}
+
+/* mostra, numa folha (bottom sheet), a lista de lançamentos de um tipo num mês —
+   acionado ao tocar numa barra do gráfico Receitas x despesas. */
+function showLancamentosDoMes(mk, tipo) {
+  const list = state.lancamentos.filter((l) => monthKey(l.data) === mk && l.tipo === tipo).slice().sort(byDataDesc);
+  const total = sum(list);
+  const titulo = (tipo === "receita" ? "Receitas" : "Despesas") + " — " + monthLabel(mk);
+  document.getElementById("sheet-content").innerHTML = `
+    <div class="sheet-title">${escapeHTML(titulo)}</div>
+    <div class="muted" style="margin-bottom:10px;">${list.length} lançamento${list.length===1?"":"s"} · total ${formatBRL(total)}</div>
+    ${list.length ? renderList(list, false) : `<div class="empty-state"><div class="big">📭</div>Nenhum lançamento.</div>`}
+    <button class="btn btn-outline" id="btn-ver-lancamentos" style="margin-top:14px;">Ver em Lançamentos</button>
+  `;
+  document.getElementById("sheet-overlay").classList.remove("hidden");
+  document.getElementById("btn-ver-lancamentos").addEventListener("click", () => {
+    state.filter.month = mk;
+    state.filter.macro = "";
+    closeSheet();
+    switchTab("lancamentos");
+  });
+}
+function drawCategoriaChart(despesasList) {
+  destroyChart("cat");
+  const byMacro = {};
+  despesasList.forEach((l) => { byMacro[l.macrocategoria] = (byMacro[l.macrocategoria] || 0) + Number(l.valor || 0); });
+  const entries = Object.entries(byMacro).sort((a,b) => b[1]-a[1]);
+  const ctx = document.getElementById("chart-cat");
+  if (!ctx) return;
+  state.charts.cat = new Chart(ctx, {
+    type: "doughnut",
+    data: {
+      labels: entries.map((e) => e[0]),
+      datasets: [{ data: entries.map((e) => e[1]), backgroundColor: entries.map((e) => macroColor(e[0])), borderColor: cssVar("--surface-1"), borderWidth: 2 }],
+    },
+    options: {
+      cutout: "62%",
+      plugins: {
+        legend: { position: "bottom", labels: { color: cssVar("--text-secondary"), font: baseChartFont(), boxWidth: 9, boxHeight: 9, padding: 12 } },
+        tooltip: tooltipStyle((c) => formatBRL(c.raw)),
+      },
+      maintainAspectRatio: false,
+    },
+  });
+}
+function drawParcelasChart(mk) {
+  destroyChart("parc");
+  const keys = next6MonthKeys(mk);
+  const vals = keys.map((k) => sum(state.lancamentos.filter((l) => monthKey(l.data) === k && l.forma_entrada === "parcelado")));
+  const ctx = document.getElementById("chart-parc");
+  if (!ctx) return;
+  state.charts.parc = new Chart(ctx, {
+    type: "bar",
+    data: { labels: keys.map((k) => monthLabel(k).slice(0,3)), datasets: [{ label: "Parcelas", data: vals, backgroundColor: cssVar("--series-1"), borderRadius: 4, maxBarThickness: 26 }] },
+    options: chartBaseOptions({ legend: false }),
+  });
+}
+function tooltipStyle(labelFn) {
+  return {
+    backgroundColor: cssVar("--surface-1"), titleColor: cssVar("--text-primary"), bodyColor: cssVar("--text-secondary"),
+    borderColor: cssVar("--gridline"), borderWidth: 1, padding: 10, cornerRadius: 8, displayColors: false,
+    callbacks: labelFn ? { label: labelFn } : undefined,
+  };
+}
+function chartBaseOptions({ legend }) {
+  return {
+    maintainAspectRatio: false,
+    plugins: {
+      legend: legend ? { position: "top", align: "end", labels: { color: cssVar("--text-secondary"), font: baseChartFont(), boxWidth: 9, boxHeight: 9, usePointStyle: true } } : { display: false },
+      tooltip: tooltipStyle((c) => c.dataset.label + ": " + formatBRL(c.raw)),
+    },
+    scales: {
+      x: { grid: { display: false }, border: { color: cssVar("--baseline") }, ticks: { color: cssVar("--muted"), font: baseChartFont() } },
+      y: { grid: { color: cssVar("--gridline") }, border: { display: false }, ticks: { color: cssVar("--muted"), font: baseChartFont(), callback: (v) => formatBRL(v).replace(",00","") } },
+    },
+  };
+}
+
+/* ---------- LANÇAMENTOS (lista) ---------- */
+function renderLancamentos(root, actions) {
+  actions.innerHTML = `<button class="icon-btn" id="btn-refresh" title="Atualizar">⟳</button>`;
+  document.getElementById("btn-refresh").onclick = () => refreshData(true);
+  const macros = distinctMacros();
+  root.innerHTML = `
+    <div class="filters-row">
+      <select id="f-month" style="flex:1;">${last18MonthOptions(state.filter.month)}</select>
+      <select id="f-macro" style="flex:1;"><option value="">Todas categorias</option>${macros.map((m) => `<option value="${escapeHTML(m)}" ${state.filter.macro===m?"selected":""}>${escapeHTML(m)}</option>`).join("")}</select>
+    </div>
+    <div class="card"><div id="lanc-list"></div></div>
+  `;
+  document.getElementById("f-month").onchange = (e) => { state.filter.month = e.target.value; renderLancamentos(root, actions); };
+  document.getElementById("f-macro").onchange = (e) => { state.filter.macro = e.target.value; renderLancamentos(root, actions); };
+
+  let list = state.lancamentos.filter((l) => !state.filter.month || monthKey(l.data) === state.filter.month);
+  if (state.filter.macro) list = list.filter((l) => l.macrocategoria === state.filter.macro);
+  list = list.slice().sort(byDataDesc);
+  document.getElementById("lanc-list").innerHTML = list.length ? renderList(list, true) : `<div class="empty-state"><div class="big">📭</div>Nenhum lançamento neste filtro.</div>`;
+  wireListActions(root);
+}
+function last18MonthOptions(selected) {
+  const now = currentMonthKey();
+  let out = "";
+  for (let i = -2; i <= 15; i++) {
+    const k = shiftMonthKey(now, -i);
+    out += `<option value="${k}" ${k===selected?"selected":""}>${monthLabel(k)}</option>`;
+  }
+  return out;
+}
+function distinctMacros() {
+  const set = new Set();
+  state.categorias.forEach((c) => c.macrocategoria && set.add(c.macrocategoria));
+  return Array.from(set);
+}
+function renderList(list, withActions) {
+  return list.map((l) => `
+    <div class="list-item" data-id="${escapeHTML(l.id)}">
+      <div class="li-left">
+        <span class="dot" style="background:${macroColor(l.macrocategoria)}"></span>
+        <div class="li-text">
+          <div class="cat">${escapeHTML(l.microcategoria || l.macrocategoria || "—")}</div>
+          <div class="sub">${escapeHTML(l.macrocategoria||"")} · ${shortDate(l.data)}${l.forma_entrada==="parcelado" ? " · parcela" : ""}${l.descricao ? " · " + escapeHTML(l.descricao) : ""}</div>
+        </div>
+      </div>
+      <div class="li-right">
+        <span class="amount ${l.tipo==="receita" ? "positive" : "negative"}">${l.tipo==="receita"?"+":"−"} ${formatBRL(l.valor)}</span>
+        ${withActions ? `<span class="li-actions" style="display:flex;"><button data-act="edit" title="Editar">✎</button><button data-act="del" title="Excluir">🗑</button></span>` : ""}
+      </div>
+    </div>`).join("");
+}
+function wireListActions(root) {
+  root.querySelectorAll('[data-act="edit"]').forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      const id = e.target.closest(".list-item").dataset.id;
+      const item = state.lancamentos.find((l) => l.id === id);
+      if (item) openSheet("manual", item);
+    });
+  });
+  root.querySelectorAll('[data-act="del"]').forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      const id = e.target.closest(".list-item").dataset.id;
+      const item = state.lancamentos.find((l) => l.id === id);
+      if (!confirm("Excluir este lançamento?")) return;
+      try {
+        await apiDelete("Lancamentos", id);
+        state.lancamentos = state.lancamentos.filter((l) => l.id !== id);
+
+        let extraCount = 0;
+        if (item && item.forma_entrada === "parcelado" && item.parcelamento_id) {
+          const futuras = state.lancamentos.filter((l) => l.parcelamento_id === item.parcelamento_id && l.data > item.data);
+          if (futuras.length && confirm(`Essa era uma parcela de compra parcelada. Excluir também as ${futuras.length} parcela${futuras.length===1?"":"s"} futura${futuras.length===1?"":"s"} dessa mesma compra?`)) {
+            for (const l of futuras) await apiDelete("Lancamentos", l.id);
+            const futIds = new Set(futuras.map((l) => l.id));
+            state.lancamentos = state.lancamentos.filter((l) => !futIds.has(l.id));
+            extraCount = futuras.length;
+          }
+        }
+
+        saveCache();
+        toast(extraCount ? `${1 + extraCount} parcelas excluídas.` : "Lançamento excluído.");
+        renderCurrentTab();
+      } catch (err) { toast("Erro ao excluir: " + err.message); }
+    });
+  });
+}
+
+/* ---------- INVESTIMENTOS ---------- */
+function renderInvestimentos(root, actions) {
+  actions.innerHTML = `<button class="icon-btn" id="btn-refresh" title="Atualizar">⟳</button>`;
+  document.getElementById("btn-refresh").onclick = () => refreshData(true);
+
+  const contas = state.investimentos.slice().sort((a, b) => (Number(b.saldo) || 0) - (Number(a.saldo) || 0));
+  const total = contas.reduce((acc, c) => acc + (Number(c.saldo) || 0), 0);
+
+  root.innerHTML = `
+    ${state.loading ? `<div class="muted" style="margin-bottom:8px;">Atualizando…</div>` : ""}
+    ${state.lastError ? `<div class="banner warn">${escapeHTML(state.lastError)}</div>` : ""}
+    <div class="card stat-tile hero">
+      <div class="label">Patrimônio total em contas</div>
+      <div class="value positive">${formatBRL(total)}</div>
+    </div>
+    <div class="card">
+      <h2>Suas contas</h2>
+      ${contas.length ? `<div id="contas-list">${contas.map((c) => `
+        <div class="list-item" data-id="${escapeHTML(c.id)}">
+          <div class="li-left">
+            <span class="dot" style="background:${cssVar('--good')}"></span>
+            <div class="li-text">
+              <div class="cat">${escapeHTML(c.banco || "—")}</div>
+              <div class="sub">${escapeHTML(c.observacao || "")}</div>
+            </div>
+          </div>
+          <div class="li-right">
+            <span class="amount positive">${formatBRL(c.saldo)}</span>
+            <span class="li-actions" style="display:flex;">
+              <button data-act="juros" title="Lançar juros">💹</button>
+              <button data-act="edit-saldo" title="Editar saldo">✎</button>
+              <button data-act="del-conta" title="Excluir">🗑</button>
+            </span>
+          </div>
+        </div>`).join("")}</div>`
+        : `<div class="empty-state"><div class="big">🏦</div>Nenhuma conta cadastrada ainda.</div>`}
+      <button class="btn btn-outline" id="add-conta-btn" style="margin-top:12px;">+ Nova conta</button>
+    </div>
+  `;
+
+  document.getElementById("add-conta-btn").addEventListener("click", addContaInvestimento);
+  root.querySelectorAll('[data-act="juros"]').forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      const id = e.target.closest(".list-item").dataset.id;
+      const conta = state.investimentos.find((c) => c.id === id);
+      if (conta) lancarJuros(conta);
+    });
+  });
+  root.querySelectorAll('[data-act="edit-saldo"]').forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      const id = e.target.closest(".list-item").dataset.id;
+      const conta = state.investimentos.find((c) => c.id === id);
+      if (conta) editarSaldoConta(conta);
+    });
+  });
+  root.querySelectorAll('[data-act="del-conta"]').forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      const id = e.target.closest(".list-item").dataset.id;
+      const conta = state.investimentos.find((c) => c.id === id);
+      if (!conta) return;
+      if (!confirm(`Excluir a conta "${conta.banco}"? Os lançamentos de juros já feitos não são apagados.`)) return;
+      try {
+        await apiDelete("Investimentos", id);
+        state.investimentos = state.investimentos.filter((c) => c.id !== id);
+        saveCache();
+        toast("Conta removida.");
+        renderCurrentTab();
+      } catch (err) { toast("Erro ao excluir: " + err.message); }
+    });
+  });
+}
+
+async function addContaInvestimento() {
+  const banco = prompt("Nome do banco/instituição:");
+  if (!banco) return;
+  const saldoStr = prompt("Saldo atual (R$):", "0,00");
+  if (saldoStr === null) return;
+  const saldo = parseValorInput(saldoStr);
+  try {
+    const created = await apiCreate("Investimentos", { banco, saldo, observacao: "" });
+    state.investimentos = state.investimentos.concat([created]);
+    saveCache();
+    toast("Conta cadastrada.");
+    renderCurrentTab();
+  } catch (err) { toast("Erro ao cadastrar: " + err.message); }
+}
+
+async function editarSaldoConta(conta) {
+  const saldoStr = prompt(`Novo saldo de "${conta.banco}" (R$):`, String(conta.saldo || 0).replace(".", ","));
+  if (saldoStr === null) return;
+  const saldo = parseValorInput(saldoStr);
+  try {
+    const updated = await apiUpdate("Investimentos", conta.id, { saldo, atualizado_em: new Date().toISOString() });
+    const idx = state.investimentos.findIndex((c) => c.id === conta.id);
+    if (idx !== -1) state.investimentos[idx] = updated;
+    saveCache();
+    toast("Saldo atualizado.");
+    renderCurrentTab();
+  } catch (err) { toast("Erro ao atualizar: " + err.message); }
+}
+
+async function lancarJuros(conta) {
+  const valorStr = prompt(`Ganho de juros em "${conta.banco}" (R$):`, "0,00");
+  if (valorStr === null) return;
+  const valor = parseValorInput(valorStr);
+  if (!valor || valor <= 0) { toast("Informe um valor válido."); return; }
+  const hoje = todayISO();
+  let created;
+  try {
+    await ensureCategoriaJuros();
+    created = await apiCreate("Lancamentos", {
+      tipo: "receita", valor, data: hoje, macrocategoria: "Receita", microcategoria: "Juros",
+      descricao: `Juros — ${conta.banco}`, conta: conta.banco, forma_entrada: "manual",
+    });
+  } catch (err) {
+    toast("Erro ao lançar juros: " + err.message);
+    return;
+  }
+  // o lançamento já foi criado na planilha — garante que ele fica visível
+  // mesmo que a atualização do saldo abaixo falhe.
+  state.lancamentos = state.lancamentos.concat([created]);
+  saveCache();
+
+  try {
+    const novoSaldo = (Number(conta.saldo) || 0) + valor;
+    const updated = await apiUpdate("Investimentos", conta.id, { saldo: novoSaldo, atualizado_em: new Date().toISOString() });
+    const idx = state.investimentos.findIndex((c) => c.id === conta.id);
+    if (idx !== -1) state.investimentos[idx] = updated;
+    saveCache();
+  } catch (errSaldo) {
+    toast("Juros lançados, mas não consegui atualizar o saldo da conta: " + errSaldo.message);
+  }
+
+  // leva direto para Lançamentos, no mês de hoje e sem filtro de categoria,
+  // para o juros lançado aparecer na hora — sem isso ele podia ficar
+  // escondido atrás de um filtro de mês/categoria deixado de uma visita anterior.
+  state.filter.month = monthKey(hoje);
+  state.filter.macro = "";
+  toast("Juros lançados como receita do mês.");
+  switchTab("lancamentos");
+}
+
+async function ensureCategoriaJuros() {
+  const exists = state.categorias.some((c) => c.macrocategoria === "Receita" && c.microcategoria === "Juros");
+  if (exists) return;
+  try {
+    const created = await apiCreate("Categorias", { macrocategoria: "Receita", microcategoria: "Juros", ativa: true });
+    state.categorias = state.categorias.concat([created]);
+  } catch (err) { /* categoria pode já existir na planilha; ignora erro silenciosamente */ }
+}
+
+/* ---------- CATEGORIAS ---------- */
+function renderCategorias(root, actions) {
+  const groups = {};
+  state.categorias.forEach((c) => {
+    if (!groups[c.macrocategoria]) groups[c.macrocategoria] = [];
+    if (c.microcategoria) groups[c.macrocategoria].push(c);
+  });
+  const macroNames = Object.keys(groups);
+  root.innerHTML = `
+    <div class="card">
+      <h2>Suas categorias</h2>
+      <p class="muted" style="margin-top:-4px;">Toque em “+” para criar uma microcategoria; ela vira padrão para os próximos lançamentos.</p>
+      ${macroNames.map((macro) => `
+        <div class="macro-group">
+          <div class="macro-head">
+            <div class="name"><span class="dot" style="background:${macroColor(macro)}"></span>${escapeHTML(macro)}</div>
+          </div>
+          <div class="chips" data-macro="${escapeHTML(macro)}">
+            ${groups[macro].map((c) => `<span class="chip" data-macro="${escapeHTML(macro)}" data-micro="${escapeHTML(c.microcategoria)}">${escapeHTML(c.microcategoria)}<button data-act="del-micro">✕</button></span>`).join("")}
+            <span class="chip" data-act="add-micro" data-macro="${escapeHTML(macro)}" style="cursor:pointer; font-weight:600;">+ nova</span>
+          </div>
+        </div>
+      `).join("")}
+      <button class="btn btn-outline" id="add-macro-btn" style="margin-top:6px;">+ Nova macrocategoria</button>
+    </div>
+  `;
+  root.querySelector("#add-macro-btn").addEventListener("click", async () => {
+    const name = prompt("Nome da nova macrocategoria:");
+    if (!name) return;
+    try { await apiCreate("Categorias", { macrocategoria: name, microcategoria: "", ativa: true }); await refreshData(); toast("Categoria criada."); } catch (err) { toast("Erro: " + err.message); }
+  });
+  root.querySelectorAll('[data-act="add-micro"]').forEach((chip) => {
+    chip.addEventListener("click", async () => {
+      const macro = chip.dataset.macro;
+      const name = prompt(`Nova microcategoria em "${macro}":`);
+      if (!name) return;
+      try { await apiCreate("Categorias", { macrocategoria: macro, microcategoria: name, ativa: true }); await refreshData(); toast("Categoria criada."); } catch (err) { toast("Erro: " + err.message); }
+    });
+  });
+  root.querySelectorAll('[data-act="del-micro"]').forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      const chip = e.target.closest(".chip");
+      const macro = chip.dataset.macro, micro = chip.dataset.micro;
+      if (!confirm(`Remover "${micro}" de ${macro}?`)) return;
+      const cat = state.categorias.find((c) => c.macrocategoria === macro && c.microcategoria === micro);
+      if (!cat || !cat.id) { toast("Não encontrei essa categoria para excluir."); return; }
+      try { await apiDelete("Categorias", cat.id); await refreshData(); toast("Categoria removida."); } catch (err) { toast("Erro: " + err.message); }
+    });
+  });
+}
+
+/* ---------- AJUSTES ---------- */
+function renderAjustes(root, actions) {
+  const c = state.config;
+  root.innerHTML = `
+    <div class="card">
+      <h2>Planilha (Google Sheets)</h2>
+      <label class="field-label">URL do Apps Script (Web App)</label>
+      <input type="url" id="cfg-sheets-url" placeholder="https://script.google.com/macros/s/.../exec" value="${escapeHTML(c.sheetsUrl)}" />
+      <div style="display:flex; gap:8px; margin-top:10px;">
+        <button class="btn btn-outline" id="btn-test">Testar conexão</button>
+        <button class="btn btn-outline" id="btn-bootstrap">Inicializar planilha</button>
+      </div>
+      <p class="muted" style="margin-top:10px;">Veja o passo a passo de publicação no final desta tela.</p>
+    </div>
+
+    <div class="card">
+      <h2>Lançamento por IA (áudio e foto)</h2>
+      <label class="field-label">Provedor</label>
+      <select id="cfg-provider">
+        <option value="none" ${c.aiProvider==="none"?"selected":""}>Nenhum (só ditado por voz do navegador)</option>
+        <option value="openai" ${c.aiProvider==="openai"?"selected":""}>OpenAI (Whisper + GPT-4o)</option>
+        <option value="anthropic" ${c.aiProvider==="anthropic"?"selected":""}>Anthropic (Claude)</option>
+      </select>
+      <label class="field-label">Chave de API</label>
+      <input type="password" id="cfg-key" placeholder="sk-... ou sk-ant-..." value="${escapeHTML(c.aiApiKey)}" />
+      <label class="field-label">Modelo de texto/visão</label>
+      <input type="text" id="cfg-model-text" value="${escapeHTML(c.aiModelText)}" />
+      <p class="muted" style="margin-top:8px; line-height:1.5;">
+        A chave fica salva só neste aparelho (localStorage) e é usada direto do navegador — igual ao Rodízio de Caronas.
+        Com Anthropic, o áudio usa o reconhecimento de voz do navegador (grátis) em vez de transcrição paga.
+      </p>
+      <button class="btn btn-primary" id="btn-save-cfg" style="margin-top:10px;">Salvar</button>
+    </div>
+
+    <div class="card">
+      <h2>Como publicar o Apps Script</h2>
+      <ol class="secondary" style="padding-left:18px; font-size:0.86rem; line-height:1.7;">
+        <li>Crie uma planilha Google em branco.</li>
+        <li>Extensões → Apps Script.</li>
+        <li>Cole o conteúdo de <code>Code.gs</code> (arquivo entregue junto com este app).</li>
+        <li>Implantar → Nova implantação → tipo “App da Web”.</li>
+        <li>Executar como “Eu”, acesso “Qualquer pessoa”.</li>
+        <li>Copie a URL gerada e cole no campo acima.</li>
+        <li>Toque em “Inicializar planilha” para criar as abas e categorias padrão.</li>
+      </ol>
+    </div>
+  `;
+  document.getElementById("btn-save-cfg").onclick = () => {
+    state.config.sheetsUrl = document.getElementById("cfg-sheets-url").value.trim();
+    state.config.aiProvider = document.getElementById("cfg-provider").value;
+    state.config.aiApiKey = document.getElementById("cfg-key").value.trim();
+    state.config.aiModelText = document.getElementById("cfg-model-text").value.trim();
+    state.config.aiModelVision = state.config.aiModelText;
+    saveConfig();
+    toast("Configurações salvas.");
+    refreshData();
+  };
+  document.getElementById("btn-test").onclick = async () => {
+    const url = document.getElementById("cfg-sheets-url").value.trim();
+    state.config.sheetsUrl = url; saveConfig();
+    try { await apiListAll(); toast("Conexão OK ✅"); } catch (err) { toast("Falhou: " + err.message); }
+  };
+  document.getElementById("btn-bootstrap").onclick = async () => {
+    const url = document.getElementById("cfg-sheets-url").value.trim();
+    state.config.sheetsUrl = url; saveConfig();
+    try { await apiBootstrap(); toast("Planilha inicializada ✅"); await refreshData(); } catch (err) { toast("Falhou: " + err.message); }
+  };
+}
+
+/* ---------- SHEET: novo / editar lançamento ---------- */
+const overlay = document.getElementById("sheet-overlay");
+document.getElementById("sheet-overlay").addEventListener("click", (e) => { if (e.target === overlay) closeSheet(); });
+
+function openSheet(mode, prefillItem) {
+  state.sheetMode = mode || "manual";
+  state.editingId = prefillItem ? prefillItem.id : null;
+  overlay.classList.remove("hidden");
+  renderSheet(prefillItem || null);
+}
+function closeSheet() {
+  overlay.classList.add("hidden");
+  stopAudioCapture(true);
+  state.editingId = null;
+}
+function renderSheet(prefill) {
+  const isEdit = !!state.editingId;
+  document.getElementById("sheet-content").innerHTML = `
+    <div class="sheet-title">${isEdit ? "Editar lançamento" : "Novo lançamento"}</div>
+    ${isEdit ? "" : `
+    <div class="segmented" id="entry-mode-tabs" style="margin-bottom:14px;">
+      <button data-mode="manual" class="active">Manual</button>
+      <button data-mode="audio">Áudio</button>
+      <button data-mode="foto">Foto</button>
+    </div>`}
+    <div id="entry-mode-body"></div>
+  `;
+  if (!isEdit) {
+    document.querySelectorAll("#entry-mode-tabs button").forEach((b) => {
+      b.addEventListener("click", () => {
+        document.querySelectorAll("#entry-mode-tabs button").forEach((x) => x.classList.remove("active"));
+        b.classList.add("active");
+        state.sheetMode = b.dataset.mode;
+        renderEntryBody(null);
+      });
+    });
+  }
+  renderEntryBody(prefill);
+}
+
+function renderEntryBody(prefill) {
+  const body = document.getElementById("entry-mode-body");
+  if (state.sheetMode === "audio" && !prefill) { body.innerHTML = audioModeHTML(); wireAudioMode(); return; }
+  if (state.sheetMode === "foto" && !prefill) { body.innerHTML = fotoModeHTML(); wireFotoMode(); return; }
+  body.innerHTML = manualFormHTML(prefill);
+  wireManualForm(prefill);
+}
+
+function audioModeHTML() {
+  const provider = state.config.aiProvider;
+  return `
+    <p class="secondary" style="font-size:0.88rem;">Descreva o gasto em voz alta, por exemplo: “gastei 45 reais no mercado hoje”.</p>
+    <div class="rec-indicator hidden" id="rec-indicator"><span class="rec-dot"></span><span id="rec-label">Ouvindo…</span></div>
+    <p class="muted" id="audio-transcript" style="min-height: 20px;"></p>
+    <button class="btn btn-primary" id="btn-record">🎙️ Gravar</button>
+    <button class="btn btn-outline hidden" id="btn-stop" style="margin-top:8px;">Parar</button>
+    ${provider === "none" ? `<p class="muted" style="margin-top:10px;">Sem provedor de IA configurado: o texto ditado vai preencher a descrição, e você completa o resto manualmente.</p>` : ""}
+  `;
+}
+function fotoModeHTML() {
+  const provider = state.config.aiProvider;
+  return `
+    <p class="secondary" style="font-size:0.88rem;">Tire uma foto da nota fiscal ou escolha uma da galeria.</p>
+    <input type="file" accept="image/*" capture="environment" id="foto-input" style="margin:10px 0;" />
+    <div id="foto-status" class="muted"></div>
+    ${provider === "none" ? `<p class="muted" style="margin-top:10px;">Sem provedor de IA configurado: a foto fica anexada como comprovante e você preenche os campos manualmente.</p>` : ""}
+  `;
+}
+
+function manualFormHTML(prefill) {
+  const p = prefill || {};
+  const tipo = p.tipo || "despesa";
+  const macros = distinctMacros();
+  const isParcelaPrefill = p.forma_entrada === "parcelado";
+  return `
+    ${p.__aiNote ? `<div class="banner info">${escapeHTML(p.__aiNote)} Confira e ajuste antes de salvar.</div>` : ""}
+    <div class="segmented type-toggle" id="tipo-toggle">
+      <button type="button" data-tipo="despesa" class="${tipo==="despesa"?"active despesa":""}">Despesa</button>
+      <button type="button" data-tipo="receita" class="${tipo==="receita"?"active receita":""}">Receita</button>
+    </div>
+
+    <label class="field-label">Valor (R$)</label>
+    <input type="text" inputmode="decimal" id="f-valor" placeholder="0,00" value="${p.valor!==undefined ? String(p.valor).replace(".",",") : ""}" />
+
+    <label class="field-label">Data</label>
+    <input type="date" id="f-data" value="${p.data || todayISO()}" />
+
+    <label class="field-label">Macrocategoria</label>
+    <select id="f-macro">
+      ${macros.map((m) => `<option value="${escapeHTML(m)}" ${m===p.macrocategoria?"selected":""}>${escapeHTML(m)}</option>`).join("")}
+      <option value="__new__">+ Nova macrocategoria…</option>
+    </select>
+
+    <label class="field-label">Microcategoria</label>
+    <select id="f-micro"></select>
+
+    <label class="field-label">Descrição (opcional)</label>
+    <input type="text" id="f-desc" value="${escapeHTML(p.descricao||"")}" placeholder="Ex: mercado do mês" />
+
+    <label class="field-label">Conta (opcional)</label>
+    <input type="text" id="f-conta" value="${escapeHTML(p.conta||"")}" placeholder="Ex: cartão, dinheiro" />
+
+    ${state.editingId ? "" : `
+    <label style="display:flex; align-items:center; gap:8px; margin-top:14px; font-size:0.9rem;">
+      <input type="checkbox" id="f-parcelado" ${isParcelaPrefill?"checked":""} /> É uma compra parcelada?
+    </label>
+    <div id="parcela-fields" class="hidden">
+      <label class="field-label">Número de parcelas</label>
+      <input type="number" min="2" max="60" id="f-num-parcelas" value="2" />
+      <p class="muted">O valor acima é o total da compra; cada parcela mensal será lançada automaticamente a partir da data escolhida.</p>
+    </div>`}
+
+    <button class="btn btn-primary" id="btn-save-lanc" style="margin-top:16px;">${state.editingId ? "Salvar alterações" : "Lançar"}</button>
+  `;
+}
+function wireManualForm(prefill) {
+  const macroSel = document.getElementById("f-macro");
+  const microSel = document.getElementById("f-micro");
+  function fillMicro(selectedMicro) {
+    const macro = macroSel.value;
+    const micros = state.categorias.filter((c) => c.macrocategoria === macro && c.microcategoria);
+    microSel.innerHTML = micros.map((c) => `<option value="${escapeHTML(c.microcategoria)}" ${c.microcategoria===selectedMicro?"selected":""}>${escapeHTML(c.microcategoria)}</option>`).join("") + `<option value="__new__">+ Nova microcategoria…</option>`;
+  }
+  function applyTipoFilter(tipo) {
+    const allMacros = distinctMacros();
+    const opts = tipo === "receita" ? allMacros.filter((m) => m === "Receita") : allMacros.filter((m) => m !== "Receita");
+    macroSel.innerHTML = opts.map((m) => `<option value="${escapeHTML(m)}">${escapeHTML(m)}</option>`).join("") + `<option value="__new__">+ Nova macrocategoria…</option>`;
+    if (prefill && prefill.macrocategoria && opts.includes(prefill.macrocategoria)) macroSel.value = prefill.macrocategoria;
+    fillMicro(prefill ? prefill.microcategoria : null);
+  }
+  document.querySelectorAll("#tipo-toggle button").forEach((b) => {
+    b.addEventListener("click", () => {
+      document.querySelectorAll("#tipo-toggle button").forEach((x) => x.classList.remove("active","despesa","receita"));
+      b.classList.add("active", b.dataset.tipo);
+      applyTipoFilter(b.dataset.tipo);
+    });
+  });
+  applyTipoFilter((prefill && prefill.tipo) || "despesa");
+
+  macroSel.addEventListener("change", async () => {
+    if (macroSel.value === "__new__") {
+      const name = prompt("Nome da nova macrocategoria:");
+      if (name) { await apiCreate("Categorias", { macrocategoria: name, microcategoria: "", ativa: true }); await refreshData(); applyTipoFilter(document.querySelector("#tipo-toggle button.active").dataset.tipo); macroSel.value = name; fillMicro(); }
+      else { macroSel.selectedIndex = 0; }
+      return;
+    }
+    fillMicro();
+  });
+  microSel.addEventListener("change", async () => {
+    if (microSel.value === "__new__") {
+      const name = prompt(`Nova microcategoria em "${macroSel.value}":`);
+      if (name) { await apiCreate("Categorias", { macrocategoria: macroSel.value, microcategoria: name, ativa: true }); await refreshData(); fillMicro(name); }
+      else { microSel.selectedIndex = 0; }
+    }
+  });
+
+  const parcCheck = document.getElementById("f-parcelado");
+  if (parcCheck) {
+    parcCheck.addEventListener("change", () => document.getElementById("parcela-fields").classList.toggle("hidden", !parcCheck.checked));
+  }
+
+  document.getElementById("btn-save-lanc").addEventListener("click", () => saveManualEntry(prefill));
+}
+
+async function saveManualEntry(prefill) {
+  const btn = document.getElementById("btn-save-lanc");
+  btn.disabled = true;
+  try {
+    const tipo = document.querySelector("#tipo-toggle button.active").dataset.tipo;
+    const valor = parseValorInput(document.getElementById("f-valor").value);
+    const data = document.getElementById("f-data").value || todayISO();
+    const macrocategoria = document.getElementById("f-macro").value;
+    const microcategoria = document.getElementById("f-micro").value;
+    const descricao = document.getElementById("f-desc").value.trim();
+    const conta = document.getElementById("f-conta").value.trim();
+    if (!valor || valor <= 0) { toast("Informe um valor válido."); btn.disabled = false; return; }
+
+    if (state.editingId) {
+      const updated = await apiUpdate("Lancamentos", state.editingId, { tipo, valor, data, macrocategoria, microcategoria, descricao, conta });
+      const idx = state.lancamentos.findIndex((l) => l.id === state.editingId);
+      if (idx !== -1) state.lancamentos[idx] = updated;
+      toast("Lançamento atualizado.");
+      saveCache(); closeSheet(); renderCurrentTab();
+      return;
+    }
+
+    const parcCheck = document.getElementById("f-parcelado");
+    if (parcCheck && parcCheck.checked) {
+      const numParcelas = Math.max(2, parseInt(document.getElementById("f-num-parcelas").value, 10) || 2);
+      const parcelamento = await apiCreate("Parcelamentos", {
+        descricao: descricao || (macrocategoria + " parcelado"), valor_total: valor, num_parcelas: numParcelas,
+        data_primeira_parcela: data, macrocategoria,
+      });
+      const base = Math.floor((valor / numParcelas) * 100) / 100;
+      const items = [];
+      let acumulado = 0;
+      for (let i = 0; i < numParcelas; i++) {
+        const isLast = i === numParcelas - 1;
+        const parcelaValor = isLast ? Math.round((valor - acumulado) * 100) / 100 : base;
+        acumulado += parcelaValor;
+        items.push({
+          tipo: "despesa", valor: parcelaValor, data: addMonthsISO(data, i),
+          macrocategoria, microcategoria, descricao: `${descricao || macrocategoria} (parcela ${i+1}/${numParcelas})`,
+          conta, forma_entrada: "parcelado", parcelamento_id: parcelamento.id, comprovante_url: prefill?.comprovante_url || "",
+        });
+      }
+      const created = await apiBulkCreate("Lancamentos", items);
+      state.lancamentos = state.lancamentos.concat(created);
+      state.parcelamentos = state.parcelamentos.concat([parcelamento]);
+      toast(`Parcelamento lançado em ${numParcelas}x.`);
+    } else {
+      const created = await apiCreate("Lancamentos", {
+        tipo, valor, data, macrocategoria, microcategoria, descricao, conta,
+        forma_entrada: prefill?.forma_entrada || "manual", comprovante_url: prefill?.comprovante_url || "",
+      });
+      state.lancamentos = state.lancamentos.concat([created]);
+      toast("Lançamento salvo.");
+    }
+    saveCache();
+    closeSheet();
+    renderCurrentTab();
+  } catch (err) {
+    toast("Erro ao salvar: " + err.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/* ---------- IA: contexto e prompt ---------- */
+function categoryContextText() {
+  const groups = {};
+  state.categorias.forEach((c) => { if (c.microcategoria) { (groups[c.macrocategoria] = groups[c.macrocategoria] || []).push(c.microcategoria); } });
+  return Object.entries(groups).map(([macro, micros]) => `${macro}: ${micros.join(", ")}`).join("\n");
+}
+function aiSystemPrompt() {
+  return `Você é um assistente que interpreta lançamentos financeiros pessoais em português do Brasil.
+Categorias existentes (prefira uma delas; combine macro e micro coerentemente):
+${categoryContextText()}
+Data de hoje: ${todayISO()}
+Responda APENAS com um objeto JSON, sem markdown e sem texto extra, no formato exato:
+{"tipo":"despesa|receita","valor":numero,"macrocategoria":"...","microcategoria":"...","data":"AAAA-MM-DD","descricao":"texto curto","confianca":"alta|media|baixa"}
+Se a data não for mencionada, use a data de hoje. "valor" deve ser apenas o número, sem símbolo de moeda.`;
+}
+function parseAIJson(text) {
+  try { return JSON.parse(text.trim()); } catch (e) {}
+  const m = text.match(/\{[\s\S]*\}/);
+  if (m) { try { return JSON.parse(m[0]); } catch (e) {} }
+  throw new Error("Não entendi a resposta da IA.");
+}
+
+/* ---------- IA: OpenAI ---------- */
+async function openaiChatJSON(systemPrompt, userContent) {
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": "Bearer " + state.config.aiApiKey },
+    body: JSON.stringify({
+      model: state.config.aiModelText || "gpt-4o-mini",
+      messages: [{ role: "system", content: systemPrompt }, { role: "user", content: userContent }],
+      response_format: { type: "json_object" },
+      temperature: 0.2,
+    }),
+  });
+  const json = await res.json();
+  if (json.error) throw new Error(json.error.message);
+  return parseAIJson(json.choices[0].message.content);
+}
+async function openaiTranscribe(blob) {
+  const form = new FormData();
+  form.append("file", blob, "audio.webm");
+  form.append("model", state.config.aiModelAudio || "whisper-1");
+  const res = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+    method: "POST", headers: { "Authorization": "Bearer " + state.config.aiApiKey }, body: form,
+  });
+  const json = await res.json();
+  if (json.error) throw new Error(json.error.message);
+  return json.text;
+}
+
+/* ---------- IA: Anthropic ---------- */
+async function anthropicMessageJSON(systemPrompt, content) {
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": state.config.aiApiKey,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true",
+    },
+    body: JSON.stringify({
+      model: state.config.aiModelText || "claude-3-5-sonnet-20241022",
+      max_tokens: 500,
+      system: systemPrompt,
+      messages: [{ role: "user", content }],
+    }),
+  });
+  const json = await res.json();
+  if (json.error) throw new Error(json.error.message);
+  return parseAIJson(json.content[0].text);
+}
+
+/* ---------- fluxo: áudio ---------- */
+function wireAudioMode() {
+  document.getElementById("btn-record").addEventListener("click", startAudioCapture);
+  document.getElementById("btn-stop").addEventListener("click", () => stopAudioCapture(false));
+}
+async function startAudioCapture() {
+  document.getElementById("rec-indicator").classList.remove("hidden");
+  document.getElementById("btn-record").classList.add("hidden");
+  document.getElementById("btn-stop").classList.remove("hidden");
+
+  if (state.config.aiProvider === "openai") {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      state.audioChunks = [];
+      state.mediaRecorder = new MediaRecorder(stream);
+      state.mediaRecorder.ondataavailable = (e) => state.audioChunks.push(e.data);
+      state.mediaRecorder.start();
+    } catch (err) {
+      toast("Não consegui acessar o microfone: " + err.message);
+      resetAudioButtons();
+    }
+    return;
+  }
+
+  // reconhecimento de voz do navegador (grátis) — Anthropic ou sem IA
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
+    toast("Seu navegador não suporta ditado por voz. Tente pelo Chrome no Android, ou use o modo Manual.");
+    resetAudioButtons();
+    return;
+  }
+  const rec = new SR();
+  rec.lang = "pt-BR";
+  rec.continuous = true;
+  rec.interimResults = true;
+  let finalTranscript = "";
+  rec.onresult = (e) => {
+    let interim = "";
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      if (e.results[i].isFinal) finalTranscript += e.results[i][0].transcript;
+      else interim += e.results[i][0].transcript;
+    }
+    document.getElementById("audio-transcript").textContent = finalTranscript + interim;
+  };
+  rec.onerror = () => {};
+  rec.onend = () => { handleAudioTranscript(finalTranscript.trim()); };
+  state.recognizer = rec;
+  rec.start();
+}
+function resetAudioButtons() {
+  document.getElementById("rec-indicator")?.classList.add("hidden");
+  document.getElementById("btn-record")?.classList.remove("hidden");
+  document.getElementById("btn-stop")?.classList.add("hidden");
+}
+async function stopAudioCapture(silent) {
+  resetAudioButtons();
+  if (state.mediaRecorder && state.mediaRecorder.state !== "inactive") {
+    const recorder = state.mediaRecorder;
+    const stopped = new Promise((resolve) => { recorder.onstop = resolve; });
+    recorder.stop();
+    recorder.stream.getTracks().forEach((t) => t.stop());
+    await stopped;
+    state.mediaRecorder = null;
+    if (silent) return;
+    const blob = new Blob(state.audioChunks, { type: "audio/webm" });
+    if (blob.size < 500) return;
+    await handleAudioBlob(blob);
+  }
+  if (state.recognizer) {
+    try { state.recognizer.stop(); } catch (e) {}
+    state.recognizer = null;
+  }
+}
+async function handleAudioBlob(blob) {
+  document.getElementById("audio-transcript").textContent = "Transcrevendo…";
+  try {
+    const transcript = await openaiTranscribe(blob);
+    document.getElementById("audio-transcript").textContent = transcript;
+    await handleAudioTranscript(transcript);
+  } catch (err) {
+    toast("Erro na transcrição: " + err.message);
+  }
+}
+async function handleAudioTranscript(transcript) {
+  if (!transcript) { toast("Não ouvi nada."); return; }
+  if (state.config.aiProvider === "none" || !state.config.aiApiKey) {
+    state.sheetMode = "manual";
+    renderEntryBody({ tipo: "despesa", data: todayISO(), descricao: transcript, __aiNote: "Preenchido a partir do seu áudio (sem IA de categorização)." });
+    return;
+  }
+  document.getElementById("audio-transcript").textContent = "Interpretando: " + transcript;
+  try {
+    let suggestion;
+    if (state.config.aiProvider === "openai") suggestion = await openaiChatJSON(aiSystemPrompt(), transcript);
+    else suggestion = await anthropicMessageJSON(aiSystemPrompt(), transcript);
+    suggestion.__aiNote = "Sugestão da IA a partir do seu áudio.";
+    state.sheetMode = "manual";
+    renderEntryBody(suggestion);
+  } catch (err) {
+    toast("A IA não conseguiu interpretar: " + err.message);
+  }
+}
+
+/* ---------- fluxo: foto ---------- */
+function wireFotoMode() {
+  document.getElementById("foto-input").addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    document.getElementById("foto-status").textContent = "Processando imagem…";
+    try {
+      const thumbDataUrl = await resizeImageToDataURL(file, 480, 0.5);
+      if (state.config.aiProvider === "none" || !state.config.aiApiKey) {
+        state.sheetMode = "manual";
+        renderEntryBody({ tipo: "despesa", data: todayISO(), comprovante_url: thumbDataUrl, __aiNote: "Foto anexada como comprovante (sem IA de leitura)." });
+        return;
+      }
+      document.getElementById("foto-status").textContent = "Lendo nota fiscal…";
+      const visionDataUrl = await resizeImageToDataURL(file, 1200, 0.8);
+      const base64 = visionDataUrl.split(",")[1];
+      let suggestion;
+      if (state.config.aiProvider === "openai") {
+        suggestion = await openaiChatJSON(aiSystemPrompt(), [
+          { type: "text", text: "Leia esta nota fiscal e extraia o lançamento." },
+          { type: "image_url", image_url: { url: visionDataUrl } },
+        ]);
+      } else {
+        suggestion = await anthropicMessageJSON(aiSystemPrompt(), [
+          { type: "image", source: { type: "base64", media_type: "image/jpeg", data: base64 } },
+          { type: "text", text: "Leia esta nota fiscal e extraia o lançamento." },
+        ]);
+      }
+      suggestion.comprovante_url = thumbDataUrl;
+      suggestion.__aiNote = "Sugestão da IA a partir da foto da nota.";
+      state.sheetMode = "manual";
+      renderEntryBody(suggestion);
+    } catch (err) {
+      toast("Erro ao processar a foto: " + err.message);
+      document.getElementById("foto-status").textContent = "";
+    }
+  });
+}
+function resizeImageToDataURL(file, maxDim, quality) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const reader = new FileReader();
+    reader.onload = () => { img.onload = () => {
+      let { width, height } = img;
+      if (width > height && width > maxDim) { height = Math.round(height * (maxDim / width)); width = maxDim; }
+      else if (height > maxDim) { width = Math.round(width * (maxDim / height)); height = maxDim; }
+      const canvas = document.createElement("canvas");
+      canvas.width = width; canvas.height = height;
+      canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+      resolve(canvas.toDataURL("image/jpeg", quality));
+    }; img.onerror = reject; img.src = reader.result; };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+/* ---------- helpers ---------- */
+function escapeHTML(str) {
+  return String(str ?? "").replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+}
+
+/* ---------- init ---------- */
+(function init() {
+  const cache = loadCache();
+  if (cache) { state.lancamentos = cache.lancamentos || []; state.categorias = cache.categorias || []; state.parcelamentos = cache.parcelamentos || []; state.investimentos = cache.investimentos || []; }
+  renderCurrentTab();
+  if (apiUrl()) refreshData();
+
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+  }
+})();
+</script>
+</body>
+</html>
