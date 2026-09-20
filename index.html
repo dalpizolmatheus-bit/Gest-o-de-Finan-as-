@@ -1348,7 +1348,8 @@ function manualFormHTML(prefill) {
   const p = prefill || {};
   const tipo = p.tipo || "despesa";
   const macros = distinctMacros();
-  const isParcelaPrefill = p.forma_entrada === "parcelado";
+  const isParcelaPrefill = p.forma_entrada === "parcelado" || p.parcelado === true;
+  const numParcelasPrefill = Math.max(2, parseInt(p.num_parcelas, 10) || 2);
   return `
     ${p.__aiNote ? `<div class="banner info">${escapeHTML(p.__aiNote)} Confira e ajuste antes de salvar.</div>` : ""}
     <div class="segmented type-toggle" id="tipo-toggle">
@@ -1381,9 +1382,9 @@ function manualFormHTML(prefill) {
     <label style="display:flex; align-items:center; gap:8px; margin-top:14px; font-size:0.9rem;">
       <input type="checkbox" id="f-parcelado" ${isParcelaPrefill?"checked":""} /> É uma compra parcelada?
     </label>
-    <div id="parcela-fields" class="hidden">
+    <div id="parcela-fields" class="${isParcelaPrefill?"":"hidden"}">
       <label class="field-label">Número de parcelas</label>
-      <input type="number" min="2" max="60" id="f-num-parcelas" value="2" />
+      <input type="number" min="2" max="60" id="f-num-parcelas" value="${numParcelasPrefill}" />
       <p class="muted">O valor acima é o total da compra; cada parcela mensal será lançada automaticamente a partir da data escolhida.</p>
     </div>`}
 
@@ -1515,8 +1516,12 @@ Categorias existentes (prefira uma delas; combine macro e micro coerentemente):
 ${categoryContextText()}
 Data de hoje: ${todayISO()}
 Responda APENAS com um objeto JSON, sem markdown e sem texto extra, no formato exato:
-{"tipo":"despesa|receita","valor":numero,"macrocategoria":"...","microcategoria":"...","data":"AAAA-MM-DD","descricao":"texto curto","confianca":"alta|media|baixa"}
-Se a data não for mencionada, use a data de hoje. "valor" deve ser apenas o número, sem símbolo de moeda.`;
+{"tipo":"despesa|receita","valor":numero,"macrocategoria":"...","microcategoria":"...","data":"AAAA-MM-DD","descricao":"texto curto","parcelado":true|false,"num_parcelas":numero,"confianca":"alta|media|baixa"}
+Se a data não for mencionada, use a data de hoje. "valor" deve ser apenas o número, sem símbolo de moeda.
+Regras para compras parceladas (ex.: "comprei uma TV em 10 prestações de 250 reais", "parcelei em 5x de 100", "paguei em 3 vezes"):
+- "parcelado" deve ser true e "num_parcelas" deve ser a quantidade de parcelas mencionada.
+- "valor" deve ser sempre o valor TOTAL da compra. Se a pessoa falar o valor de cada parcela (ex.: "10 prestações de 250 reais"), multiplique: valor = num_parcelas × valor_da_parcela (nesse exemplo, valor = 2500). Se a pessoa já falar o valor total (ex.: "parcelei uma compra de 2500 em 10x"), use esse total direto.
+- Se a compra não for parcelada, "parcelado" deve ser false e "num_parcelas" deve ser 1.`;
 }
 function parseAIJson(text) {
   try { return JSON.parse(text.trim()); } catch (e) {}
