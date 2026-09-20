@@ -25,13 +25,13 @@
     --baseline: #c3c2b7;
     --border: rgba(11,11,11,0.10);
     --series-1: #2a78d6; /* Alimentação */
-    --series-2: #eb6834; /* Saúde */
-    --series-3: #1baf7a; /* Transporte/Automóvel */
+    --series-2: #d63053; /* Saúde */
+    --series-3: #00b2c2; /* Transporte/Automóvel */
     --series-4: #eda100; /* Moradia */
     --series-5: #e87ba4; /* Sítio */
-    --series-6: #008300; /* Lazer/Festas */
+    --series-6: #b740b1; /* Lazer/Festas */
     --series-7: #4a3aa7; /* Educação */
-    --series-8: #e34948; /* Outros */
+    --series-8: #915200; /* Outros */
     --good: #047857; /* entradas / marca — verde */
     --critical: #eb6834; /* saídas, dívidas — laranja vívido */
     --radius-lg: 18px;
@@ -50,13 +50,13 @@
       --baseline: #383835;
       --border: rgba(255,255,255,0.10);
       --series-1: #3987e5;
-      --series-2: #d95926;
-      --series-3: #199e70;
+      --series-2: #b9003d;
+      --series-3: #008f9f;
       --series-4: #c98500;
       --series-5: #d55181;
-      --series-6: #008300;
+      --series-6: #9d2398;
       --series-7: #9085e9;
-      --series-8: #e66767;
+      --series-8: #a16100;
       --good: #059669;
       --critical: #d95926;
     }
@@ -72,13 +72,13 @@
     --baseline: #383835;
     --border: rgba(255,255,255,0.10);
     --series-1: #3987e5;
-    --series-2: #d95926;
-    --series-3: #199e70;
+    --series-2: #b9003d;
+    --series-3: #008f9f;
     --series-4: #c98500;
     --series-5: #d55181;
-    --series-6: #008300;
+    --series-6: #9d2398;
     --series-7: #9085e9;
-    --series-8: #e66767;
+    --series-8: #a16100;
     --good: #059669;
     --critical: #d95926;
   }
@@ -643,6 +643,7 @@ function renderPainelMes(root) {
 
   const prevMk = shiftMonthKey(mk, -1);
   const prevDespesas = sum(state.lancamentos.filter((l) => monthKey(l.data) === prevMk && l.tipo === "despesa"));
+  const prevReceitas = sum(state.lancamentos.filter((l) => monthKey(l.data) === prevMk && l.tipo === "receita"));
   const mkLabel = monthLabel(mk).split(" ")[0];
   const prevMkLabel = monthLabel(prevMk).split(" ")[0];
 
@@ -681,7 +682,7 @@ function renderPainelMes(root) {
     </div>
 
     <div class="card">
-      <h2>Comparativo por categoria — ${mkLabel} vs ${prevMkLabel}</h2>
+      <h2>Comparativo de despesas por categoria — ${mkLabel} vs ${prevMkLabel}</h2>
       ${(despesas > 0 || prevDespesas > 0) ? `
         <div class="legend-row" style="margin-bottom:6px;">
           <div class="item"><span class="sw" style="background:${hexToRgba(cssVar("--critical"), 0.35)};"></span>${escapeHTML(prevMkLabel)}</div>
@@ -690,6 +691,18 @@ function renderPainelMes(root) {
         <p class="muted" style="margin:-2px 0 10px;">Arraste para o lado para ver todas as categorias · ▲ gastou mais · ▼ gastou menos que ${escapeHTML(prevMkLabel)}</p>
         <div class="chart-scroll"><div class="chart-wrap wide" id="chart-catcomp-wrap"><canvas id="chart-catcomp"></canvas></div></div>
       ` : `<div class="empty-state"><div class="big">📊</div>Sem despesas suficientes para comparar com ${escapeHTML(prevMkLabel)}.</div>`}
+    </div>
+
+    <div class="card">
+      <h2>Comparativo de receitas por categoria — ${mkLabel} vs ${prevMkLabel}</h2>
+      ${(receitas > 0 || prevReceitas > 0) ? `
+        <div class="legend-row" style="margin-bottom:6px;">
+          <div class="item"><span class="sw" style="background:${hexToRgba(cssVar("--good"), 0.35)};"></span>${escapeHTML(prevMkLabel)}</div>
+          <div class="item"><span class="sw" style="background:${cssVar("--good")};"></span>${escapeHTML(mkLabel)}</div>
+        </div>
+        <p class="muted" style="margin:-2px 0 10px;">Arraste para o lado para ver todas as categorias · ▲ recebeu mais · ▼ recebeu menos que ${escapeHTML(prevMkLabel)}</p>
+        <div class="chart-scroll"><div class="chart-wrap wide" id="chart-catcomp-receita-wrap"><canvas id="chart-catcomp-receita"></canvas></div></div>
+      ` : `<div class="empty-state"><div class="big">📊</div>Sem receitas suficientes para comparar com ${escapeHTML(prevMkLabel)}.</div>`}
     </div>
 
     <div class="card">
@@ -706,7 +719,8 @@ function renderPainelMes(root) {
   document.getElementById("card-divida-futura")?.addEventListener("click", () => showParcelasAbertas());
   drawReceitasDespesasChart(last6MonthKeys(mk));
   if (despesas > 0) drawCategoriaChart(doMes.filter((l) => l.tipo === "despesa"), monthLabel(mk), (l) => monthKey(l.data) === mk);
-  if (despesas > 0 || prevDespesas > 0) drawCategoriaComparativoChart(mk, prevMk, mkLabel, prevMkLabel);
+  if (despesas > 0 || prevDespesas > 0) drawCategoriaComparativoChart("despesa", mk, prevMk, mkLabel, prevMkLabel, "chart-catcomp", "catcomp");
+  if (receitas > 0 || prevReceitas > 0) drawCategoriaComparativoChart("receita", mk, prevMk, mkLabel, prevMkLabel, "chart-catcomp-receita", "catcompReceita");
   drawParcelasChart(mk);
 }
 
@@ -775,6 +789,7 @@ function renderPainelGeral(root) {
 
   const anterior = periodoAnteriorInfo();
   const prevDespesas = sum(state.lancamentos.filter((l) => l.tipo === "despesa" && anterior.keys.includes(monthKey(l.data))));
+  const prevReceitas = sum(state.lancamentos.filter((l) => l.tipo === "receita" && anterior.keys.includes(monthKey(l.data))));
 
   root.innerHTML = `
     ${state.loading ? `<div class="muted" style="margin-bottom:8px;">Atualizando…</div>` : ""}
@@ -806,7 +821,7 @@ function renderPainelGeral(root) {
     </div>
 
     <div class="card">
-      <h2>Comparativo por categoria — ${escapeHTML(periodoLabelCurto)} vs ${escapeHTML(anterior.label)}</h2>
+      <h2>Comparativo de despesas por categoria — ${escapeHTML(periodoLabelCurto)} vs ${escapeHTML(anterior.label)}</h2>
       ${(despesas > 0 || prevDespesas > 0) ? `
         <div class="legend-row" style="margin-bottom:6px;">
           <div class="item"><span class="sw" style="background:${hexToRgba(cssVar("--critical"), 0.35)};"></span>${escapeHTML(anterior.label)}</div>
@@ -816,13 +831,26 @@ function renderPainelGeral(root) {
         <div class="chart-scroll"><div class="chart-wrap wide" id="chart-catcomp-wrap"><canvas id="chart-catcomp"></canvas></div></div>
       ` : `<div class="empty-state"><div class="big">📊</div>Sem despesas suficientes para comparar com ${escapeHTML(anterior.label)}.</div>`}
     </div>
+
+    <div class="card">
+      <h2>Comparativo de receitas por categoria — ${escapeHTML(periodoLabelCurto)} vs ${escapeHTML(anterior.label)}</h2>
+      ${(receitas > 0 || prevReceitas > 0) ? `
+        <div class="legend-row" style="margin-bottom:6px;">
+          <div class="item"><span class="sw" style="background:${hexToRgba(cssVar("--good"), 0.35)};"></span>${escapeHTML(anterior.label)}</div>
+          <div class="item"><span class="sw" style="background:${cssVar("--good")};"></span>${escapeHTML(periodoLabelCurto)}</div>
+        </div>
+        <p class="muted" style="margin:-2px 0 10px;">Arraste para o lado para ver todas as categorias · ▲ recebeu mais · ▼ recebeu menos que ${escapeHTML(anterior.label)}</p>
+        <div class="chart-scroll"><div class="chart-wrap wide" id="chart-catcomp-receita-wrap"><canvas id="chart-catcomp-receita"></canvas></div></div>
+      ` : `<div class="empty-state"><div class="big">📊</div>Sem receitas suficientes para comparar com ${escapeHTML(anterior.label)}.</div>`}
+    </div>
   `;
   root.querySelectorAll("#geral-period-toggle button").forEach((b) => {
     b.addEventListener("click", () => { state.geralPeriodType = b.dataset.period; renderCurrentTab(); });
   });
   drawReceitasDespesasChart(periodoMonthKeys());
   if (despesas > 0) { const periodKeysSet = new Set(periodoMonthKeys()); drawCategoriaChart(periodo.filter((l) => l.tipo === "despesa"), periodoLabel, (l) => periodKeysSet.has(monthKey(l.data))); }
-  if (despesas > 0 || prevDespesas > 0) drawCategoriaComparativoChart(periodoMonthKeys(), anterior.keys, periodoLabelCurto, anterior.label);
+  if (despesas > 0 || prevDespesas > 0) drawCategoriaComparativoChart("despesa", periodoMonthKeys(), anterior.keys, periodoLabelCurto, anterior.label, "chart-catcomp", "catcomp");
+  if (receitas > 0 || prevReceitas > 0) drawCategoriaComparativoChart("receita", periodoMonthKeys(), anterior.keys, periodoLabelCurto, anterior.label, "chart-catcomp-receita", "catcompReceita");
 }
 
 function sum(list) { return list.reduce((acc, l) => acc + (Number(l.valor) || 0), 0); }
@@ -1048,13 +1076,16 @@ function drawCategoriaChart(despesasList, periodLabel, periodMatchFn) {
    despesa (no período atual) pra menor, com uma setinha + % de variação desenhada
    acima de cada par de barras. Rola pro lado quando tem categoria demais pra caber
    na tela. curKeys/prevKeys: string "AAAA-MM" ou array delas (trimestre/ano). */
-function drawCategoriaComparativoChart(curKeys, prevKeys, curLabel, prevLabel) {
-  destroyChart("catcomp");
+function drawCategoriaComparativoChart(tipo, curKeys, prevKeys, curLabel, prevLabel, canvasId, chartKey) {
+  chartKey = chartKey || "catcomp";
+  canvasId = canvasId || "chart-catcomp";
+  destroyChart(chartKey);
+  const isReceita = tipo === "receita";
   const curSet = new Set(Array.isArray(curKeys) ? curKeys : [curKeys]);
   const prevSet = new Set(Array.isArray(prevKeys) ? prevKeys : [prevKeys]);
   const curByMacro = {}, prevByMacro = {};
   state.lancamentos.forEach((l) => {
-    if (l.tipo !== "despesa") return;
+    if (l.tipo !== tipo) return;
     const lk = monthKey(l.data);
     if (curSet.has(lk)) curByMacro[l.macrocategoria] = (curByMacro[l.macrocategoria] || 0) + Number(l.valor || 0);
     else if (prevSet.has(lk)) prevByMacro[l.macrocategoria] = (prevByMacro[l.macrocategoria] || 0) + Number(l.valor || 0);
@@ -1065,18 +1096,25 @@ function drawCategoriaComparativoChart(curKeys, prevKeys, curLabel, prevLabel) {
     .filter((r) => r.prev > 0 || r.cur > 0)
     .sort((a, b) => b.cur - a.cur || b.prev - a.prev);
 
-  const ctx = document.getElementById("chart-catcomp");
+  const ctx = document.getElementById(canvasId);
   if (!ctx || !rows.length) return;
 
-  const wrapEl = document.getElementById("chart-catcomp-wrap");
+  const wrapEl = document.getElementById(canvasId + "-wrap");
   if (wrapEl) wrapEl.style.width = Math.max(rows.length * 82, 340) + "px";
 
-  const prevColor = hexToRgba(cssVar("--critical"), 0.35);
-  const curColor = cssVar("--critical");
+  // para despesas, a cor "principal" é a crítica (laranja) e subir é ruim;
+  // para receitas, a cor principal é a "good" (verde) e subir é bom — a lógica
+  // de cor do delta (▲/▼) se inverte de acordo.
+  const mainColor = cssVar(isReceita ? "--good" : "--critical");
+  const prevColor = hexToRgba(mainColor, 0.35);
+  const curColor = mainColor;
   const goodColor = cssVar("--good");
+  const criticalColor = cssVar("--critical");
+  const increaseColor = isReceita ? goodColor : criticalColor;
+  const decreaseColor = isReceita ? criticalColor : goodColor;
 
   const deltaPlugin = {
-    id: "catcompDelta",
+    id: "catcompDelta" + chartKey,
     afterDatasetsDraw(chart) {
       const metaPrev = chart.getDatasetMeta(0);
       const metaCur = chart.getDatasetMeta(1);
@@ -1090,12 +1128,12 @@ function drawCategoriaComparativoChart(curKeys, prevKeys, curLabel, prevLabel) {
         const barPrev = metaPrev.data[i];
         if (!barCur) return;
         let text, color;
-        if (r.prev === 0 && r.cur > 0) { text = "novo"; color = curColor; }
-        else if (r.prev > 0 && r.cur === 0) { text = "▼100%"; color = goodColor; }
+        if (r.prev === 0 && r.cur > 0) { text = "novo"; color = increaseColor; }
+        else if (r.prev > 0 && r.cur === 0) { text = "▼100%"; color = decreaseColor; }
         else {
           const pct = Math.round(((r.cur - r.prev) / r.prev) * 100);
           if (pct === 0) { text = "="; color = cssVar("--muted"); }
-          else { text = (pct > 0 ? "▲" : "▼") + Math.abs(pct) + "%"; color = pct > 0 ? curColor : goodColor; }
+          else { text = (pct > 0 ? "▲" : "▼") + Math.abs(pct) + "%"; color = pct > 0 ? increaseColor : decreaseColor; }
         }
         const topY = Math.min(barCur.y, barPrev ? barPrev.y : barCur.y) - 6;
         c.fillStyle = color;
@@ -1112,7 +1150,7 @@ function drawCategoriaComparativoChart(curKeys, prevKeys, curLabel, prevLabel) {
   opts.scales.x.ticks.minRotation = 0;
   opts.onHover = pointerCursorOnHover;
 
-  state.charts.catcomp = new Chart(ctx, {
+  state.charts[chartKey] = new Chart(ctx, {
     type: "bar",
     data: {
       labels: rows.map((r) => r.macro),
@@ -1124,8 +1162,8 @@ function drawCategoriaComparativoChart(curKeys, prevKeys, curLabel, prevLabel) {
     options: opts,
     plugins: [deltaPlugin],
   });
-  state.charts.catcomp.canvas.addEventListener("dblclick", (evt) => {
-    const points = state.charts.catcomp.getElementsAtEventForMode(evt, "nearest", { intersect: true }, true);
+  state.charts[chartKey].canvas.addEventListener("dblclick", (evt) => {
+    const points = state.charts[chartKey].getElementsAtEventForMode(evt, "nearest", { intersect: true }, true);
     if (!points.length) return;
     const { datasetIndex, index } = points[0];
     const row = rows[index];
@@ -1134,7 +1172,7 @@ function drawCategoriaComparativoChart(curKeys, prevKeys, curLabel, prevLabel) {
     const periodSet = isPrev ? prevSet : curSet;
     const periodLbl = isPrev ? prevLabel : curLabel;
     const macro = row.macro;
-    const filterFn = (l) => l.tipo === "despesa" && l.macrocategoria === macro && periodSet.has(monthKey(l.data));
+    const filterFn = (l) => l.tipo === tipo && l.macrocategoria === macro && periodSet.has(monthKey(l.data));
     showLancamentosGenerico(filterFn, `${macro} — ${periodLbl}`);
   });
 }
