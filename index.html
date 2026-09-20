@@ -144,6 +144,7 @@
   .value.negative { color: var(--critical); }
 
   .chart-wrap { position: relative; width: 100%; height: 220px; }
+  .chart-wrap canvas { touch-action: manipulation; }
   .chart-wrap.donut { height: 240px; }
   .chart-wrap.wide { height: 230px; }
   .chart-scroll { overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; }
@@ -704,7 +705,7 @@ function renderPainelMes(root) {
   wireListActions(root);
   document.getElementById("card-divida-futura")?.addEventListener("click", () => showParcelasAbertas());
   drawReceitasDespesasChart(last6MonthKeys(mk));
-  if (despesas > 0) drawCategoriaChart(doMes.filter((l) => l.tipo === "despesa"));
+  if (despesas > 0) drawCategoriaChart(doMes.filter((l) => l.tipo === "despesa"), monthLabel(mk));
   if (despesas > 0 || prevDespesas > 0) drawCategoriaComparativoChart(mk, prevMk, mkLabel, prevMkLabel);
   drawParcelasChart(mk);
 }
@@ -820,7 +821,7 @@ function renderPainelGeral(root) {
     b.addEventListener("click", () => { state.geralPeriodType = b.dataset.period; renderCurrentTab(); });
   });
   drawReceitasDespesasChart(periodoMonthKeys());
-  if (despesas > 0) drawCategoriaChart(periodo.filter((l) => l.tipo === "despesa"));
+  if (despesas > 0) drawCategoriaChart(periodo.filter((l) => l.tipo === "despesa"), periodoLabel);
   if (despesas > 0 || prevDespesas > 0) drawCategoriaComparativoChart(periodoMonthKeys(), anterior.keys, periodoLabelCurto, anterior.label);
 }
 
@@ -904,7 +905,25 @@ function showLancamentosDoMes(mk, tipo) {
     switchTab("lancamentos");
   });
 }
-function drawCategoriaChart(despesasList) {
+
+/* mostra, numa folha, uma lista de lançamentos já filtrada (por categoria, por
+   período, etc.) — acionado ao dar dois toques/cliques numa fatia ou barra dos
+   gráficos de categoria/comparativo/parcelas. Somente leitura (a lista some da
+   tela ao fechar a folha, então editar/excluir aqui não teria como atualizar o
+   gráfico que já foi desenhado). */
+function showLancamentosGenerico(list, titulo) {
+  const sorted = list.slice().sort(byDataDesc);
+  const total = sum(sorted);
+  document.getElementById("sheet-content").innerHTML = `
+    <div class="sheet-title">${escapeHTML(titulo)}</div>
+    <div class="muted" style="margin-bottom:10px;">${sorted.length} lançamento${sorted.length===1?"":"s"} · total ${formatBRL(total)}</div>
+    ${sorted.length ? renderList(sorted, false) : `<div class="empty-state"><div class="big">📭</div>Nenhum lançamento.</div>`}
+  `;
+  document.getElementById("sheet-overlay").classList.remove("hidden");
+}
+function pointerCursorOnHover(evt, els, chart) { chart.canvas.style.cursor = els.length ? "pointer" : "default"; }
+
+function drawCategoriaChart(despesasList, periodLabel) {
   destroyChart("cat");
   const byMacro = {};
   despesasList.forEach((l) => { byMacro[l.macrocategoria] = (byMacro[l.macrocategoria] || 0) + Number(l.valor || 0); });
@@ -972,8 +991,16 @@ function drawCategoriaChart(despesasList) {
         }),
       },
       maintainAspectRatio: false,
+      onHover: pointerCursorOnHover,
     },
     plugins: [donutPctPlugin],
+  });
+  state.charts.cat.canvas.addEventListener("dblclick", (evt) => {
+    const points = state.charts.cat.getElementsAtEventForMode(evt, "nearest", { intersect: true }, true);
+    if (!points.length) return;
+    const macro = entries[points[0].index][0];
+    const list = despesasList.filter((l) => l.macrocategoria === macro);
+    showLancamentosGenerico(list, `${macro} — ${periodLabel || ""}`.trim());
   });
 }
 
@@ -1044,6 +1071,7 @@ function drawCategoriaComparativoChart(curKeys, prevKeys, curLabel, prevLabel) {
   opts.scales.x.ticks.autoSkip = false;
   opts.scales.x.ticks.maxRotation = 45;
   opts.scales.x.ticks.minRotation = 0;
+  opts.onHover = pointerCursorOnHover;
 
   state.charts.catcomp = new Chart(ctx, {
     type: "bar",
@@ -1057,6 +1085,18 @@ function drawCategoriaComparativoChart(curKeys, prevKeys, curLabel, prevLabel) {
     options: opts,
     plugins: [deltaPlugin],
   });
+  state.charts.catcomp.canvas.addEventListener("dblclick", (evt) => {
+    const points = state.charts.catcomp.getElementsAtEventForMode(evt, "nearest", { intersect: true }, true);
+    if (!points.length) return;
+    const { datasetIndex, index } = points[0];
+    const row = rows[index];
+    if (!row) return;
+    const isPrev = datasetIndex === 0;
+    const periodSet = isPrev ? prevSet : curSet;
+    const periodLbl = isPrev ? prevLabel : curLabel;
+    const list = state.lancamentos.filter((l) => l.tipo === "despesa" && l.macrocategoria === row.macro && periodSet.has(monthKey(l.data)));
+    showLancamentosGenerico(list, `${row.macro} — ${periodLbl}`);
+  });
 }
 function drawParcelasChart(mk) {
   destroyChart("parc");
@@ -1064,10 +1104,19 @@ function drawParcelasChart(mk) {
   const vals = keys.map((k) => sum(state.lancamentos.filter((l) => monthKey(l.data) === k && l.forma_entrada === "parcelado" && l.tipo === "despesa")));
   const ctx = document.getElementById("chart-parc");
   if (!ctx) return;
+  const opts = chartBaseOptions({ legend: false });
+  opts.onHover = pointerCursorOnHover;
   state.charts.parc = new Chart(ctx, {
     type: "bar",
     data: { labels: keys.map((k) => monthLabel(k).slice(0,3)), datasets: [{ label: "Parcelas", data: vals, backgroundColor: cssVar("--critical"), borderRadius: 4, maxBarThickness: 26 }] },
-    options: chartBaseOptions({ legend: false }),
+    options: opts,
+  });
+  state.charts.parc.canvas.addEventListener("dblclick", (evt) => {
+    const points = state.charts.parc.getElementsAtEventForMode(evt, "nearest", { intersect: true }, true);
+    if (!points.length) return;
+    const mkSel = keys[points[0].index];
+    const list = state.lancamentos.filter((l) => l.forma_entrada === "parcelado" && l.tipo === "despesa" && monthKey(l.data) === mkSel);
+    showLancamentosGenerico(list, `Parcelas — ${monthLabel(mkSel)}`);
   });
 }
 function tooltipStyle(labelFn) {
