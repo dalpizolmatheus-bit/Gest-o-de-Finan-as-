@@ -705,7 +705,7 @@ function renderPainelMes(root) {
   wireListActions(root);
   document.getElementById("card-divida-futura")?.addEventListener("click", () => showParcelasAbertas());
   drawReceitasDespesasChart(last6MonthKeys(mk));
-  if (despesas > 0) drawCategoriaChart(doMes.filter((l) => l.tipo === "despesa"), monthLabel(mk));
+  if (despesas > 0) drawCategoriaChart(doMes.filter((l) => l.tipo === "despesa"), monthLabel(mk), (l) => monthKey(l.data) === mk);
   if (despesas > 0 || prevDespesas > 0) drawCategoriaComparativoChart(mk, prevMk, mkLabel, prevMkLabel);
   drawParcelasChart(mk);
 }
@@ -821,7 +821,7 @@ function renderPainelGeral(root) {
     b.addEventListener("click", () => { state.geralPeriodType = b.dataset.period; renderCurrentTab(); });
   });
   drawReceitasDespesasChart(periodoMonthKeys());
-  if (despesas > 0) drawCategoriaChart(periodo.filter((l) => l.tipo === "despesa"), periodoLabel);
+  if (despesas > 0) { const periodKeysSet = new Set(periodoMonthKeys()); drawCategoriaChart(periodo.filter((l) => l.tipo === "despesa"), periodoLabel, (l) => periodKeysSet.has(monthKey(l.data))); }
   if (despesas > 0 || prevDespesas > 0) drawCategoriaComparativoChart(periodoMonthKeys(), anterior.keys, periodoLabelCurto, anterior.label);
 }
 
@@ -906,24 +906,63 @@ function showLancamentosDoMes(mk, tipo) {
   });
 }
 
-/* mostra, numa folha, uma lista de lançamentos já filtrada (por categoria, por
-   período, etc.) — acionado ao dar dois toques/cliques numa fatia ou barra dos
-   gráficos de categoria/comparativo/parcelas. Somente leitura (a lista some da
-   tela ao fechar a folha, então editar/excluir aqui não teria como atualizar o
-   gráfico que já foi desenhado). */
-function showLancamentosGenerico(list, titulo) {
-  const sorted = list.slice().sort(byDataDesc);
-  const total = sum(sorted);
+/* mostra, numa folha, uma lista de lançamentos filtrada a partir do estado atual
+   (por categoria, por período, etc.) — acionado ao dar dois toques/cliques numa
+   fatia ou barra dos gráficos de categoria/comparativo/parcelas. Com editar e
+   excluir; como roda dentro de uma folha "por cima" de um gráfico já desenhado,
+   depois de excluir ela re-renderiza a aba de trás (pro gráfico atualizar) E a
+   si mesma (recalculando o filtro do zero, pro item excluído sumir da lista). */
+function showLancamentosGenerico(filterFn, titulo) {
+  const list = state.lancamentos.filter(filterFn).slice().sort(byDataDesc);
+  const total = sum(list);
   document.getElementById("sheet-content").innerHTML = `
     <div class="sheet-title">${escapeHTML(titulo)}</div>
-    <div class="muted" style="margin-bottom:10px;">${sorted.length} lançamento${sorted.length===1?"":"s"} · total ${formatBRL(total)}</div>
-    ${sorted.length ? renderList(sorted, false) : `<div class="empty-state"><div class="big">📭</div>Nenhum lançamento.</div>`}
+    <div class="muted" style="margin-bottom:10px;">${list.length} lançamento${list.length===1?"":"s"} · total ${formatBRL(total)}</div>
+    ${list.length ? renderList(list, true) : `<div class="empty-state"><div class="big">📭</div>Nenhum lançamento.</div>`}
   `;
   document.getElementById("sheet-overlay").classList.remove("hidden");
+  wireGenericoListActions(filterFn, titulo);
+}
+function wireGenericoListActions(filterFn, titulo) {
+  const container = document.getElementById("sheet-content");
+  container.querySelectorAll('[data-act="edit"]').forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      const id = e.target.closest(".list-item").dataset.id;
+      const item = state.lancamentos.find((l) => l.id === id);
+      if (item) openSheet("manual", item);
+    });
+  });
+  container.querySelectorAll('[data-act="del"]').forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      const id = e.target.closest(".list-item").dataset.id;
+      const item = state.lancamentos.find((l) => l.id === id);
+      if (!confirm("Excluir este lançamento?")) return;
+      try {
+        await apiDelete("Lancamentos", id);
+        state.lancamentos = state.lancamentos.filter((l) => l.id !== id);
+
+        let extraCount = 0;
+        if (item && item.forma_entrada === "parcelado" && item.parcelamento_id) {
+          const futuras = state.lancamentos.filter((l) => l.parcelamento_id === item.parcelamento_id && l.data > item.data);
+          if (futuras.length && confirm(`Essa era uma parcela de compra parcelada. Excluir também as ${futuras.length} parcela${futuras.length===1?"":"s"} futura${futuras.length===1?"":"s"} dessa mesma compra?`)) {
+            for (const l of futuras) await apiDelete("Lancamentos", l.id);
+            const futIds = new Set(futuras.map((l) => l.id));
+            state.lancamentos = state.lancamentos.filter((l) => !futIds.has(l.id));
+            extraCount = futuras.length;
+          }
+        }
+
+        saveCache();
+        toast(extraCount ? `${1 + extraCount} parcelas excluídas.` : "Lançamento excluído.");
+        renderCurrentTab();
+        showLancamentosGenerico(filterFn, titulo);
+      } catch (err) { toast("Erro ao excluir: " + err.message); }
+    });
+  });
 }
 function pointerCursorOnHover(evt, els, chart) { chart.canvas.style.cursor = els.length ? "pointer" : "default"; }
 
-function drawCategoriaChart(despesasList, periodLabel) {
+function drawCategoriaChart(despesasList, periodLabel, periodMatchFn) {
   destroyChart("cat");
   const byMacro = {};
   despesasList.forEach((l) => { byMacro[l.macrocategoria] = (byMacro[l.macrocategoria] || 0) + Number(l.valor || 0); });
@@ -999,8 +1038,8 @@ function drawCategoriaChart(despesasList, periodLabel) {
     const points = state.charts.cat.getElementsAtEventForMode(evt, "nearest", { intersect: true }, true);
     if (!points.length) return;
     const macro = entries[points[0].index][0];
-    const list = despesasList.filter((l) => l.macrocategoria === macro);
-    showLancamentosGenerico(list, `${macro} — ${periodLabel || ""}`.trim());
+    const filterFn = (l) => l.tipo === "despesa" && l.macrocategoria === macro && (!periodMatchFn || periodMatchFn(l));
+    showLancamentosGenerico(filterFn, `${macro} — ${periodLabel || ""}`.trim());
   });
 }
 
@@ -1094,8 +1133,9 @@ function drawCategoriaComparativoChart(curKeys, prevKeys, curLabel, prevLabel) {
     const isPrev = datasetIndex === 0;
     const periodSet = isPrev ? prevSet : curSet;
     const periodLbl = isPrev ? prevLabel : curLabel;
-    const list = state.lancamentos.filter((l) => l.tipo === "despesa" && l.macrocategoria === row.macro && periodSet.has(monthKey(l.data)));
-    showLancamentosGenerico(list, `${row.macro} — ${periodLbl}`);
+    const macro = row.macro;
+    const filterFn = (l) => l.tipo === "despesa" && l.macrocategoria === macro && periodSet.has(monthKey(l.data));
+    showLancamentosGenerico(filterFn, `${macro} — ${periodLbl}`);
   });
 }
 function drawParcelasChart(mk) {
@@ -1115,8 +1155,8 @@ function drawParcelasChart(mk) {
     const points = state.charts.parc.getElementsAtEventForMode(evt, "nearest", { intersect: true }, true);
     if (!points.length) return;
     const mkSel = keys[points[0].index];
-    const list = state.lancamentos.filter((l) => l.forma_entrada === "parcelado" && l.tipo === "despesa" && monthKey(l.data) === mkSel);
-    showLancamentosGenerico(list, `Parcelas — ${monthLabel(mkSel)}`);
+    const filterFn = (l) => l.forma_entrada === "parcelado" && l.tipo === "despesa" && monthKey(l.data) === mkSel;
+    showLancamentosGenerico(filterFn, `Parcelas — ${monthLabel(mkSel)}`);
   });
 }
 function tooltipStyle(labelFn) {
