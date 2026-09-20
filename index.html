@@ -8,7 +8,7 @@
 <link rel="manifest" href="manifest.json" />
 <link rel="icon" href="icon-192.png" />
 <link rel="apple-touch-icon" href="apple-touch-icon.png" />
-<meta name="theme-color" content="#2a78d6" />
+<meta name="theme-color" content="#047857" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 <meta name="apple-mobile-web-app-title" content="Finanças" />
@@ -32,8 +32,8 @@
     --series-6: #008300; /* Lazer/Festas */
     --series-7: #4a3aa7; /* Educação */
     --series-8: #e34948; /* Outros */
-    --good: #2a78d6; /* entradas — mesmo azul da marca, no lugar do verde tradicional */
-    --critical: #eb6834; /* saídas — laranja vívido, no lugar do vermelho tradicional */
+    --good: #047857; /* entradas / marca — verde */
+    --critical: #eb6834; /* saídas, dívidas — laranja vívido */
     --radius-lg: 18px;
     --radius-md: 12px;
     --radius-sm: 9px;
@@ -57,7 +57,7 @@
       --series-6: #008300;
       --series-7: #9085e9;
       --series-8: #e66767;
-      --good: #3987e5;
+      --good: #059669;
       --critical: #d95926;
     }
   }
@@ -79,7 +79,7 @@
     --series-6: #008300;
     --series-7: #9085e9;
     --series-8: #e66767;
-    --good: #3987e5;
+    --good: #059669;
     --critical: #d95926;
   }
 
@@ -181,7 +181,7 @@
     flex: 1; border: none; background: none; padding: 9px 6px; border-radius: 999px;
     font-size: 0.86rem; font-weight: 600; color: var(--text-secondary); cursor: pointer;
   }
-  .segmented button.active { background: var(--series-1); color: #fff; }
+  .segmented button.active { background: var(--good); color: #fff; }
   .segmented.type-toggle button.active.despesa { background: var(--critical); color: #fff; }
   .segmented.type-toggle button.active.receita { background: var(--good); color: #fff; }
 
@@ -190,7 +190,7 @@
     border: none; border-radius: var(--radius-sm); padding: 11px 16px;
     font-size: 0.92rem; font-weight: 600; cursor: pointer; width: 100%;
   }
-  .btn-primary { background: var(--series-1); color: #fff; }
+  .btn-primary { background: var(--good); color: #fff; }
   .btn-outline { background: none; border: 1px solid var(--gridline); color: var(--text-primary); }
   .btn-ghost { background: var(--surface-0); color: var(--text-secondary); }
   .btn[disabled] { opacity: 0.5; pointer-events: none; }
@@ -204,11 +204,11 @@
   }
   .nav-btn { background: none; border: none; display: flex; flex-direction: column; align-items: center; gap: 2px; color: var(--muted); font-size: 0.58rem; cursor: pointer; padding: 4px 1px; flex: 1; min-width: 0; }
   .nav-btn .ic { font-size: 1.4rem; }
-  .nav-btn.active { color: var(--series-1); }
+  .nav-btn.active { color: var(--good); }
 
   .fab {
     position: fixed; right: max(20px, calc((100% - 480px)/2 + 20px)); bottom: calc(86px + env(safe-area-inset-bottom));
-    width: 58px; height: 58px; border-radius: 50%; background: var(--series-1); color: #fff;
+    width: 58px; height: 58px; border-radius: 50%; background: var(--good); color: #fff;
     border: none; font-size: 30px; line-height: 1; box-shadow: 0 4px 14px rgba(0,0,0,0.25); cursor: pointer; z-index: 26;
   }
 
@@ -225,7 +225,7 @@
   .macro-group .macro-head .name { font-weight: 700; font-size: 0.92rem; display: flex; align-items: center; gap: 8px; }
 
   .banner { border-radius: var(--radius-md); padding: 12px 14px; font-size: 0.86rem; margin-bottom: 12px; }
-  .banner.info { background: color-mix(in srgb, var(--series-1) 12%, var(--surface-1)); border: 1px solid var(--series-1); }
+  .banner.info { background: color-mix(in srgb, var(--good) 12%, var(--surface-1)); border: 1px solid var(--good); }
   .banner.warn { background: color-mix(in srgb, var(--series-4) 16%, var(--surface-1)); border: 1px solid var(--series-4); }
 
   .toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(96px + env(safe-area-inset-bottom)); background: var(--text-primary); color: var(--surface-1); padding: 10px 18px; border-radius: 999px; font-size: 0.85rem; z-index: 80; box-shadow: 0 4px 14px rgba(0,0,0,0.25); }
@@ -239,7 +239,7 @@
   .legend-row .item { display: flex; align-items: center; gap: 6px; color: var(--text-secondary); }
   .legend-row .sw { width: 9px; height: 9px; border-radius: 50%; }
 
-  a { color: var(--series-1); }
+  a { color: var(--good); }
   .hidden { display: none !important; }
 </style>
 </head>
@@ -293,7 +293,7 @@ function cssVar(name) {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
 function macroColor(macro) {
-  if (macro === "Receita") return cssVar("--series-1"); // mesma cor do "Receitas" no gráfico
+  if (macro === "Receita") return cssVar("--good"); // mesma cor do "Receitas" no gráfico
   const idx = MACRO_COLOR_ORDER.indexOf(macro);
   const slot = idx === -1 ? 8 : idx + 1;
   return cssVar("--series-" + slot);
@@ -315,7 +315,7 @@ const state = {
   geralPeriodType: "trimestre",
   geralYear: currentYear(),
   geralQuarter: currentQuarter(),
-  filter: { month: currentMonthKey(), macro: "" },
+  filter: { mode: "mes", month: currentMonthKey(), year: currentYear(), macro: "" },
   charts: {},
   sheetMode: "manual",
   editingId: null,
@@ -611,10 +611,10 @@ function renderPainelMes(root) {
       <div class="stat-tile"><div class="label">Despesas</div><div class="value negative">${formatBRL(despesas)}</div></div>
     </div>
     ${dividaFutura > 0 ? `
-    <div class="card stat-tile">
+    <div class="card stat-tile" id="card-divida-futura" style="cursor:pointer;">
       <div class="label">Dívida futura em aberto (parcelas)</div>
       <div class="value">${formatBRL(dividaFutura)}</div>
-      <div class="muted" style="margin-top:2px;">${parcelasAbertas.length} parcela${parcelasAbertas.length===1?"":"s"} em ${comprasAbertas} compra${comprasAbertas===1?"":"s"}</div>
+      <div class="muted" style="margin-top:2px;">${parcelasAbertas.length} parcela${parcelasAbertas.length===1?"":"s"} em ${comprasAbertas} compra${comprasAbertas===1?"":"s"} · toque para ver</div>
     </div>` : ""}
 
     <div class="card">
@@ -640,9 +640,65 @@ function renderPainelMes(root) {
     </div>
   `;
   wireListActions(root);
+  document.getElementById("card-divida-futura")?.addEventListener("click", () => showParcelasAbertas());
   drawReceitasDespesasChart(last6MonthKeys(mk));
   if (despesas > 0) drawCategoriaChart(doMes.filter((l) => l.tipo === "despesa"));
   drawParcelasChart(mk);
+}
+
+/* mostra, numa folha, todas as parcelas futuras em aberto — com edição e exclusão,
+   acionado ao tocar no card "Dívida futura em aberto" do Painel Mês. */
+function showParcelasAbertas() {
+  const parcelasAbertas = state.lancamentos.filter((l) => l.forma_entrada === "parcelado" && l.data >= todayISO());
+  const dividaFutura = sum(parcelasAbertas);
+  const list = parcelasAbertas.slice().sort((a, b) => (a.data || "").localeCompare(b.data || ""));
+  document.getElementById("sheet-content").innerHTML = `
+    <div class="sheet-title">Dívida futura em aberto</div>
+    <div class="muted" style="margin-bottom:10px;">${list.length} parcela${list.length===1?"":"s"} · total ${formatBRL(dividaFutura)}</div>
+    ${list.length ? renderList(list, true) : `<div class="empty-state"><div class="big">📭</div>Nenhuma parcela em aberto.</div>`}
+  `;
+  document.getElementById("sheet-overlay").classList.remove("hidden");
+  wireParcelasAbertasActions(document.getElementById("sheet-content"));
+}
+
+/* como wireListActions, mas — por rodar dentro da folha de "Dívida futura" — também
+   atualiza a própria lista da folha depois de excluir, em vez de só re-renderizar
+   o painel atrás dela (senão o item excluído continuava aparecendo na folha aberta). */
+function wireParcelasAbertasActions(container) {
+  container.querySelectorAll('[data-act="edit"]').forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      const id = e.target.closest(".list-item").dataset.id;
+      const item = state.lancamentos.find((l) => l.id === id);
+      if (item) openSheet("manual", item);
+    });
+  });
+  container.querySelectorAll('[data-act="del"]').forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      const id = e.target.closest(".list-item").dataset.id;
+      const item = state.lancamentos.find((l) => l.id === id);
+      if (!confirm("Excluir esta parcela?")) return;
+      try {
+        await apiDelete("Lancamentos", id);
+        state.lancamentos = state.lancamentos.filter((l) => l.id !== id);
+
+        let extraCount = 0;
+        if (item && item.forma_entrada === "parcelado" && item.parcelamento_id) {
+          const futuras = state.lancamentos.filter((l) => l.parcelamento_id === item.parcelamento_id && l.data > item.data);
+          if (futuras.length && confirm(`Essa era uma parcela de compra parcelada. Excluir também as ${futuras.length} parcela${futuras.length===1?"":"s"} futura${futuras.length===1?"":"s"} dessa mesma compra?`)) {
+            for (const l of futuras) await apiDelete("Lancamentos", l.id);
+            const futIds = new Set(futuras.map((l) => l.id));
+            state.lancamentos = state.lancamentos.filter((l) => !futIds.has(l.id));
+            extraCount = futuras.length;
+          }
+        }
+
+        saveCache();
+        toast(extraCount ? `${1 + extraCount} parcelas excluídas.` : "Parcela excluída.");
+        renderCurrentTab();
+        showParcelasAbertas();
+      } catch (err) { toast("Erro ao excluir: " + err.message); }
+    });
+  });
 }
 
 function renderPainelGeral(root) {
@@ -799,7 +855,7 @@ function drawParcelasChart(mk) {
   if (!ctx) return;
   state.charts.parc = new Chart(ctx, {
     type: "bar",
-    data: { labels: keys.map((k) => monthLabel(k).slice(0,3)), datasets: [{ label: "Parcelas", data: vals, backgroundColor: cssVar("--series-1"), borderRadius: 4, maxBarThickness: 26 }] },
+    data: { labels: keys.map((k) => monthLabel(k).slice(0,3)), datasets: [{ label: "Parcelas", data: vals, backgroundColor: cssVar("--critical"), borderRadius: 4, maxBarThickness: 26 }] },
     options: chartBaseOptions({ legend: false }),
   });
 }
@@ -829,19 +885,44 @@ function renderLancamentos(root, actions) {
   actions.innerHTML = `<button class="icon-btn" id="btn-refresh" title="Atualizar">⟳</button>`;
   document.getElementById("btn-refresh").onclick = () => refreshData(true);
   const macros = distinctMacros();
+  const mode = state.filter.mode === "ano" ? "ano" : "mes";
   root.innerHTML = `
+    <div class="segmented" id="periodo-mode-toggle" style="margin-bottom:10px;">
+      <button data-mode="mes" class="${mode==="mes"?"active":""}">Mês</button>
+      <button data-mode="ano" class="${mode==="ano"?"active":""}">Ano</button>
+    </div>
     <div class="filters-row">
-      <select id="f-month" style="flex:1;">${last18MonthOptions(state.filter.month)}</select>
+      ${mode === "ano"
+        ? `<select id="f-year" style="flex:1;">${yearOptions(state.filter.year)}</select>`
+        : `<select id="f-month" style="flex:1;">${last18MonthOptions(state.filter.month)}</select>`}
       <select id="f-macro" style="flex:1;"><option value="">Todas categorias</option>${macros.map((m) => `<option value="${escapeHTML(m)}" ${state.filter.macro===m?"selected":""}>${escapeHTML(m)}</option>`).join("")}</select>
     </div>
-    <div class="card"><div id="lanc-list"></div></div>
+    <div class="card">
+      <div id="lanc-resumo" class="muted" style="margin-bottom:8px;"></div>
+      <div id="lanc-list"></div>
+    </div>
   `;
-  document.getElementById("f-month").onchange = (e) => { state.filter.month = e.target.value; renderLancamentos(root, actions); };
+  document.querySelectorAll("#periodo-mode-toggle button").forEach((b) => {
+    b.addEventListener("click", () => { state.filter.mode = b.dataset.mode; renderLancamentos(root, actions); });
+  });
+  if (mode === "ano") {
+    document.getElementById("f-year").onchange = (e) => { state.filter.year = Number(e.target.value); renderLancamentos(root, actions); };
+  } else {
+    document.getElementById("f-month").onchange = (e) => { state.filter.month = e.target.value; renderLancamentos(root, actions); };
+  }
   document.getElementById("f-macro").onchange = (e) => { state.filter.macro = e.target.value; renderLancamentos(root, actions); };
 
-  let list = state.lancamentos.filter((l) => !state.filter.month || monthKey(l.data) === state.filter.month);
+  let list = mode === "ano"
+    ? state.lancamentos.filter((l) => (l.data || "").slice(0,4) === String(state.filter.year))
+    : state.lancamentos.filter((l) => !state.filter.month || monthKey(l.data) === state.filter.month);
   if (state.filter.macro) list = list.filter((l) => l.macrocategoria === state.filter.macro);
   list = list.slice().sort(byDataDesc);
+
+  const totalReceitas = sum(list.filter((l) => l.tipo === "receita"));
+  const totalDespesas = sum(list.filter((l) => l.tipo === "despesa"));
+  document.getElementById("lanc-resumo").textContent = list.length
+    ? `${list.length} lançamento${list.length===1?"":"s"} · Receitas ${formatBRL(totalReceitas)} · Despesas ${formatBRL(totalDespesas)}`
+    : "";
   document.getElementById("lanc-list").innerHTML = list.length ? renderList(list, true) : `<div class="empty-state"><div class="big">📭</div>Nenhum lançamento neste filtro.</div>`;
   wireListActions(root);
 }
@@ -854,16 +935,28 @@ function last18MonthOptions(selected) {
   }
   return out;
 }
+function yearOptions(selected) {
+  const now = currentYear();
+  let out = "";
+  for (let y = now + 1; y >= now - 5; y--) {
+    out += `<option value="${y}" ${y===selected?"selected":""}>${y}</option>`;
+  }
+  return out;
+}
 function distinctMacros() {
   const set = new Set();
   state.categorias.forEach((c) => c.macrocategoria && set.add(c.macrocategoria));
   return Array.from(set);
 }
+function tipoColor(tipo) {
+  // verde para entrada (receita), laranja para saída (despesa) — mesmo laranja já usado em "Despesas"
+  return tipo === "receita" ? cssVar("--series-3") : cssVar("--critical");
+}
 function renderList(list, withActions) {
   return list.map((l) => `
     <div class="list-item" data-id="${escapeHTML(l.id)}">
       <div class="li-left">
-        <span class="dot" style="background:${macroColor(l.macrocategoria)}"></span>
+        <span class="dot" style="background:${tipoColor(l.tipo)}"></span>
         <div class="li-text">
           <div class="cat">${escapeHTML(l.microcategoria || l.macrocategoria || "—")}</div>
           <div class="sub">${escapeHTML(l.macrocategoria||"")} · ${shortDate(l.data)}${l.forma_entrada==="parcelado" ? " · parcela" : ""}${l.descricao ? " · " + escapeHTML(l.descricao) : ""}</div>
