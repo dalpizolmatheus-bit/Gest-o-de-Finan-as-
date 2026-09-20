@@ -214,9 +214,15 @@
 
   .sheet-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 50; display: flex; align-items: flex-end; }
   .sheet-overlay.hidden { display: none; }
-  .sheet { width: 100%; max-height: 90vh; overflow-y: auto; background: var(--surface-1); border-radius: 20px 20px 0 0; padding: 16px 16px calc(28px + env(safe-area-inset-bottom)); max-width: 480px; margin: 0 auto; }
+  .sheet { position: relative; width: 100%; max-height: 90vh; overflow-y: auto; background: var(--surface-1); border-radius: 20px 20px 0 0; padding: 16px 16px calc(28px + env(safe-area-inset-bottom)); max-width: 480px; margin: 0 auto; }
   .sheet-handle { width: 36px; height: 4px; background: var(--gridline); border-radius: 999px; margin: 0 auto 12px; }
-  .sheet-title { font-weight: 700; font-size: 1.05rem; margin-bottom: 12px; }
+  .sheet-close {
+    position: absolute; top: 10px; right: 10px; width: 32px; height: 32px; border-radius: 50%;
+    background: var(--surface-0); border: 1px solid var(--gridline); color: var(--text-primary);
+    font-size: 1.1rem; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center; z-index: 1;
+  }
+  .sheet-close:active { background: var(--gridline); }
+  .sheet-title { font-weight: 700; font-size: 1.05rem; margin-bottom: 12px; padding-right: 34px; }
 
   .chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px; background: var(--surface-0); border: 1px solid var(--gridline); font-size: 0.82rem; margin: 0 6px 6px 0; }
   .chip button { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 0.85rem; padding: 0; }
@@ -266,6 +272,7 @@
 
 <div class="sheet-overlay hidden" id="sheet-overlay">
   <div class="sheet" id="sheet">
+    <button class="sheet-close" id="sheet-close-btn" title="Fechar" aria-label="Fechar">✕</button>
     <div class="sheet-handle"></div>
     <div id="sheet-content"></div>
   </div>
@@ -1278,6 +1285,7 @@ function renderAjustes(root, actions) {
 /* ---------- SHEET: novo / editar lançamento ---------- */
 const overlay = document.getElementById("sheet-overlay");
 document.getElementById("sheet-overlay").addEventListener("click", (e) => { if (e.target === overlay) closeSheet(); });
+document.getElementById("sheet-close-btn").addEventListener("click", () => closeSheet());
 
 function openSheet(mode, prefillItem) {
   state.sheetMode = mode || "manual";
