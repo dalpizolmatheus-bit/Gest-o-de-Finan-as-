@@ -1174,7 +1174,7 @@ function chartBaseOptions({ legend }) {
       tooltip: tooltipStyle((c) => c.dataset.label + ": " + formatBRL(c.raw)),
     },
     scales: {
-      x: { grid: { display: false }, border: { color: cssVar("--baseline") }, ticks: { color: cssVar("--muted"), font: baseChartFont() } },
+      x: { grid: { display: false }, border: { color: cssVar("--baseline") }, ticks: { color: cssVar("--text-secondary"), font: baseChartFont() } },
       y: { grid: { color: cssVar("--gridline") }, border: { display: false }, ticks: { color: cssVar("--muted"), font: baseChartFont(), callback: (v) => formatBRL(v).replace(",00","") } },
     },
   };
