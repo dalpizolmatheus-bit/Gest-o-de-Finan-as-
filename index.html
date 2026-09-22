@@ -725,7 +725,7 @@ function renderPainelMes(root) {
     <div class="card">
       <h2>Despesas por forma de pagamento — ${mkLabel}</h2>
       ${despesas > 0
-        ? `<div class="chart-wrap donut"><canvas id="chart-meiopag"></canvas></div>`
+        ? `<div class="chart-wrap"><canvas id="chart-meiopag"></canvas></div>`
         : `<div class="empty-state"><div class="big">💳</div>Sem despesas neste mês ainda.</div>`}
     </div>
   `;
@@ -736,7 +736,7 @@ function renderPainelMes(root) {
   if (despesas > 0 || prevDespesas > 0) drawCategoriaComparativoChart("despesa", mk, prevMk, mkLabel, prevMkLabel, "chart-catcomp", "catcomp");
   if (receitas > 0 || prevReceitas > 0) drawCategoriaComparativoChart("receita", mk, prevMk, mkLabel, prevMkLabel, "chart-catcomp-receita", "catcompReceita");
   if (despesas > 0) {
-    drawCategoriaChart(doMes.filter((l) => l.tipo === "despesa"), monthLabel(mk), (l) => monthKey(l.data) === mk, {
+    drawValorPorChaveBarChart(doMes.filter((l) => l.tipo === "despesa"), monthLabel(mk), (l) => monthKey(l.data) === mk, {
       canvasId: "chart-meiopag", chartKey: "meiopag", keyFn: (l) => l.meio_pagamento, colorFn: meioPagamentoColor, emptyLabel: "Não informado",
     });
   }
@@ -866,7 +866,7 @@ function renderPainelGeral(root) {
     <div class="card">
       <h2>Despesas por forma de pagamento — ${escapeHTML(periodoLabel)}</h2>
       ${despesas > 0
-        ? `<div class="chart-wrap donut"><canvas id="chart-meiopag"></canvas></div>`
+        ? `<div class="chart-wrap"><canvas id="chart-meiopag"></canvas></div>`
         : `<div class="empty-state"><div class="big">💳</div>Sem despesas neste período.</div>`}
     </div>
   `;
@@ -879,7 +879,7 @@ function renderPainelGeral(root) {
   if (receitas > 0 || prevReceitas > 0) drawCategoriaComparativoChart("receita", periodoMonthKeys(), anterior.keys, periodoLabelCurto, anterior.label, "chart-catcomp-receita", "catcompReceita");
   if (despesas > 0) {
     const periodKeysSet2 = new Set(periodoMonthKeys());
-    drawCategoriaChart(periodo.filter((l) => l.tipo === "despesa"), periodoLabel, (l) => periodKeysSet2.has(monthKey(l.data)), {
+    drawValorPorChaveBarChart(periodo.filter((l) => l.tipo === "despesa"), periodoLabel, (l) => periodKeysSet2.has(monthKey(l.data)), {
       canvasId: "chart-meiopag", chartKey: "meiopag", keyFn: (l) => l.meio_pagamento, colorFn: meioPagamentoColor, emptyLabel: "Não informado",
     });
   }
@@ -1099,6 +1099,66 @@ function drawCategoriaChart(despesasList, periodLabel, periodMatchFn, opts) {
       onHover: pointerCursorOnHover,
     },
     plugins: [donutPctPlugin],
+  });
+  state.charts[chartKey].canvas.addEventListener("dblclick", (evt) => {
+    const points = state.charts[chartKey].getElementsAtEventForMode(evt, "nearest", { intersect: true }, true);
+    if (!points.length) return;
+    const key = entries[points[0].index][0];
+    const filterFn = (l) => l.tipo === "despesa" && (keyFn(l) || emptyLabel) === key && (!periodMatchFn || periodMatchFn(l));
+    showLancamentosGenerico(filterFn, `${key} — ${periodLabel || ""}`.trim());
+  });
+}
+
+/* Gráfico de barras com o valor em R$ (não %) por chave (ex.: forma de pagamento).
+   keyFn extrai a chave de cada lançamento; colorFn escolhe a cor de cada barra. */
+function drawValorPorChaveBarChart(despesasList, periodLabel, periodMatchFn, opts) {
+  opts = opts || {};
+  const canvasId = opts.canvasId;
+  const chartKey = opts.chartKey;
+  const keyFn = opts.keyFn;
+  const colorFn = opts.colorFn;
+  const emptyLabel = opts.emptyLabel || "—";
+  destroyChart(chartKey);
+  const byKey = {};
+  despesasList.forEach((l) => { const k = keyFn(l) || emptyLabel; byKey[k] = (byKey[k] || 0) + Number(l.valor || 0); });
+  const entries = Object.entries(byKey).sort((a, b) => b[1] - a[1]);
+  const ctx = document.getElementById(canvasId);
+  if (!ctx || !entries.length) return;
+  const colors = entries.map((e) => colorFn(e[0]));
+
+  // desenha o valor em R$ em cima de cada barra
+  const valuePlugin = {
+    id: "valorBarLabel" + chartKey,
+    afterDatasetsDraw(chart) {
+      const meta = chart.getDatasetMeta(0);
+      if (!meta) return;
+      const c = chart.ctx;
+      c.save();
+      c.font = "700 11px system-ui, -apple-system, sans-serif";
+      c.textAlign = "center";
+      c.fillStyle = cssVar("--text-primary");
+      meta.data.forEach((bar, i) => {
+        if (chart.getDataVisibility && !chart.getDataVisibility(i)) return;
+        c.fillText(formatBRL(entries[i][1]), bar.x, bar.y - 8);
+      });
+      c.restore();
+    },
+  };
+
+  const chartOpts = chartBaseOptions({ legend: false });
+  chartOpts.layout = { padding: { top: 22 } };
+  chartOpts.scales.x.ticks.autoSkip = false;
+  chartOpts.onHover = pointerCursorOnHover;
+  chartOpts.plugins.tooltip = tooltipStyle((c) => formatBRL(c.raw));
+
+  state.charts[chartKey] = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels: entries.map((e) => e[0]),
+      datasets: [{ data: entries.map((e) => e[1]), backgroundColor: colors, borderRadius: 4, maxBarThickness: 46 }],
+    },
+    options: chartOpts,
+    plugins: [valuePlugin],
   });
   state.charts[chartKey].canvas.addEventListener("dblclick", (evt) => {
     const points = state.charts[chartKey].getElementsAtEventForMode(evt, "nearest", { intersect: true }, true);
