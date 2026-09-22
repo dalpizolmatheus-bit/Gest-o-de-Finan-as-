@@ -308,6 +308,13 @@ function macroColor(macro) {
   const slot = idx === -1 ? 8 : idx + 1;
   return cssVar("--series-" + slot);
 }
+const MEIO_PAGAMENTO_OPTS = ["Pix", "Cartão de Crédito", "Desconto em Folha"];
+function meioPagamentoColor(meio) {
+  if (meio === "Pix") return cssVar("--series-1");
+  if (meio === "Cartão de Crédito") return cssVar("--series-4");
+  if (meio === "Desconto em Folha") return cssVar("--series-7");
+  return cssVar("--muted"); // não informado
+}
 // Escolhe texto branco ou escuro por cima de uma cor de preenchimento, pela luminância (WCAG).
 function textColorForFill_(hex) {
   const h = (hex || "").replace("#", "");
@@ -714,6 +721,13 @@ function renderPainelMes(root) {
       <h2>Lançamentos recentes</h2>
       <div id="recent-list">${renderList(state.lancamentos.slice().sort(byDataDesc).slice(0, 8))}</div>
     </div>
+
+    <div class="card">
+      <h2>Despesas por forma de pagamento — ${mkLabel}</h2>
+      ${despesas > 0
+        ? `<div class="chart-wrap donut"><canvas id="chart-meiopag"></canvas></div>`
+        : `<div class="empty-state"><div class="big">💳</div>Sem despesas neste mês ainda.</div>`}
+    </div>
   `;
   wireListActions(root);
   document.getElementById("card-divida-futura")?.addEventListener("click", () => showParcelasAbertas());
@@ -721,6 +735,11 @@ function renderPainelMes(root) {
   if (despesas > 0) drawCategoriaChart(doMes.filter((l) => l.tipo === "despesa"), monthLabel(mk), (l) => monthKey(l.data) === mk);
   if (despesas > 0 || prevDespesas > 0) drawCategoriaComparativoChart("despesa", mk, prevMk, mkLabel, prevMkLabel, "chart-catcomp", "catcomp");
   if (receitas > 0 || prevReceitas > 0) drawCategoriaComparativoChart("receita", mk, prevMk, mkLabel, prevMkLabel, "chart-catcomp-receita", "catcompReceita");
+  if (despesas > 0) {
+    drawCategoriaChart(doMes.filter((l) => l.tipo === "despesa"), monthLabel(mk), (l) => monthKey(l.data) === mk, {
+      canvasId: "chart-meiopag", chartKey: "meiopag", keyFn: (l) => l.meio_pagamento, colorFn: meioPagamentoColor, emptyLabel: "Não informado",
+    });
+  }
   drawParcelasChart(mk);
 }
 
@@ -843,6 +862,13 @@ function renderPainelGeral(root) {
         <div class="chart-scroll"><div class="chart-wrap wide" id="chart-catcomp-receita-wrap"><canvas id="chart-catcomp-receita"></canvas></div></div>
       ` : `<div class="empty-state"><div class="big">📊</div>Sem receitas suficientes para comparar com ${escapeHTML(anterior.label)}.</div>`}
     </div>
+
+    <div class="card">
+      <h2>Despesas por forma de pagamento — ${escapeHTML(periodoLabel)}</h2>
+      ${despesas > 0
+        ? `<div class="chart-wrap donut"><canvas id="chart-meiopag"></canvas></div>`
+        : `<div class="empty-state"><div class="big">💳</div>Sem despesas neste período.</div>`}
+    </div>
   `;
   root.querySelectorAll("#geral-period-toggle button").forEach((b) => {
     b.addEventListener("click", () => { state.geralPeriodType = b.dataset.period; renderCurrentTab(); });
@@ -851,6 +877,12 @@ function renderPainelGeral(root) {
   if (despesas > 0) { const periodKeysSet = new Set(periodoMonthKeys()); drawCategoriaChart(periodo.filter((l) => l.tipo === "despesa"), periodoLabel, (l) => periodKeysSet.has(monthKey(l.data))); }
   if (despesas > 0 || prevDespesas > 0) drawCategoriaComparativoChart("despesa", periodoMonthKeys(), anterior.keys, periodoLabelCurto, anterior.label, "chart-catcomp", "catcomp");
   if (receitas > 0 || prevReceitas > 0) drawCategoriaComparativoChart("receita", periodoMonthKeys(), anterior.keys, periodoLabelCurto, anterior.label, "chart-catcomp-receita", "catcompReceita");
+  if (despesas > 0) {
+    const periodKeysSet2 = new Set(periodoMonthKeys());
+    drawCategoriaChart(periodo.filter((l) => l.tipo === "despesa"), periodoLabel, (l) => periodKeysSet2.has(monthKey(l.data)), {
+      canvasId: "chart-meiopag", chartKey: "meiopag", keyFn: (l) => l.meio_pagamento, colorFn: meioPagamentoColor, emptyLabel: "Não informado",
+    });
+  }
 }
 
 function sum(list) { return list.reduce((acc, l) => acc + (Number(l.valor) || 0), 0); }
@@ -990,14 +1022,20 @@ function wireGenericoListActions(filterFn, titulo) {
 }
 function pointerCursorOnHover(evt, els, chart) { chart.canvas.style.cursor = els.length ? "pointer" : "default"; }
 
-function drawCategoriaChart(despesasList, periodLabel, periodMatchFn) {
-  destroyChart("cat");
+function drawCategoriaChart(despesasList, periodLabel, periodMatchFn, opts) {
+  opts = opts || {};
+  const canvasId = opts.canvasId || "chart-cat";
+  const chartKey = opts.chartKey || "cat";
+  const keyFn = opts.keyFn || ((l) => l.macrocategoria);
+  const colorFn = opts.colorFn || macroColor;
+  const emptyLabel = opts.emptyLabel || "—";
+  destroyChart(chartKey);
   const byMacro = {};
-  despesasList.forEach((l) => { byMacro[l.macrocategoria] = (byMacro[l.macrocategoria] || 0) + Number(l.valor || 0); });
+  despesasList.forEach((l) => { const k = keyFn(l) || emptyLabel; byMacro[k] = (byMacro[k] || 0) + Number(l.valor || 0); });
   const entries = Object.entries(byMacro).sort((a,b) => b[1]-a[1]);
   const total = entries.reduce((s, e) => s + e[1], 0);
-  const colors = entries.map((e) => macroColor(e[0]));
-  const ctx = document.getElementById("chart-cat");
+  const colors = entries.map((e) => colorFn(e[0]));
+  const ctx = document.getElementById(canvasId);
   if (!ctx) return;
 
   // Desenha o % de cada fatia sobre o próprio gráfico — só nas fatias grandes o
@@ -1029,7 +1067,7 @@ function drawCategoriaChart(despesasList, periodLabel, periodMatchFn) {
     },
   };
 
-  state.charts.cat = new Chart(ctx, {
+  state.charts[chartKey] = new Chart(ctx, {
     type: "doughnut",
     data: {
       labels: entries.map((e) => e[0]),
@@ -1062,12 +1100,12 @@ function drawCategoriaChart(despesasList, periodLabel, periodMatchFn) {
     },
     plugins: [donutPctPlugin],
   });
-  state.charts.cat.canvas.addEventListener("dblclick", (evt) => {
-    const points = state.charts.cat.getElementsAtEventForMode(evt, "nearest", { intersect: true }, true);
+  state.charts[chartKey].canvas.addEventListener("dblclick", (evt) => {
+    const points = state.charts[chartKey].getElementsAtEventForMode(evt, "nearest", { intersect: true }, true);
     if (!points.length) return;
-    const macro = entries[points[0].index][0];
-    const filterFn = (l) => l.tipo === "despesa" && l.macrocategoria === macro && (!periodMatchFn || periodMatchFn(l));
-    showLancamentosGenerico(filterFn, `${macro} — ${periodLabel || ""}`.trim());
+    const key = entries[points[0].index][0];
+    const filterFn = (l) => l.tipo === "despesa" && (keyFn(l) || emptyLabel) === key && (!periodMatchFn || periodMatchFn(l));
+    showLancamentosGenerico(filterFn, `${key} — ${periodLabel || ""}`.trim());
   });
 }
 
@@ -1729,6 +1767,14 @@ function manualFormHTML(prefill) {
     <label class="field-label">Conta (opcional)</label>
     <input type="text" id="f-conta" value="${escapeHTML(p.conta||"")}" placeholder="Ex: cartão, dinheiro" />
 
+    <div id="meio-pagamento-field" class="${tipo==="despesa"?"":"hidden"}">
+      <label class="field-label">Como foi pago?</label>
+      <select id="f-meio-pagamento">
+        <option value="" ${!p.meio_pagamento?"selected":""}>— não informado —</option>
+        ${MEIO_PAGAMENTO_OPTS.map((m) => `<option value="${escapeHTML(m)}" ${p.meio_pagamento===m?"selected":""}>${escapeHTML(m)}</option>`).join("")}
+      </select>
+    </div>
+
     ${state.editingId ? "" : `
     <label style="display:flex; align-items:center; gap:8px; margin-top:14px; font-size:0.9rem;">
       <input type="checkbox" id="f-parcelado" ${isParcelaPrefill?"checked":""} /> <span id="f-parcelado-label">${parcelaCopy(tipo).label}</span>
@@ -1767,6 +1813,8 @@ function wireManualForm(prefill) {
       const helperEl = document.getElementById("f-parcelado-helper");
       if (labelEl) labelEl.textContent = copy.label;
       if (helperEl) helperEl.textContent = copy.helper;
+      const meioPagField = document.getElementById("meio-pagamento-field");
+      if (meioPagField) meioPagField.classList.toggle("hidden", b.dataset.tipo !== "despesa");
     });
   });
   applyTipoFilter((prefill && prefill.tipo) || "despesa");
@@ -1807,10 +1855,11 @@ async function saveManualEntry(prefill) {
     const microcategoria = document.getElementById("f-micro").value;
     const descricao = document.getElementById("f-desc").value.trim();
     const conta = document.getElementById("f-conta").value.trim();
+    const meioPagamento = tipo === "despesa" ? (document.getElementById("f-meio-pagamento")?.value || "") : "";
     if (!valor || valor <= 0) { toast("Informe um valor válido."); btn.disabled = false; return; }
 
     if (state.editingId) {
-      const updated = await apiUpdate("Lancamentos", state.editingId, { tipo, valor, data, macrocategoria, microcategoria, descricao, conta });
+      const updated = await apiUpdate("Lancamentos", state.editingId, { tipo, valor, data, macrocategoria, microcategoria, descricao, conta, meio_pagamento: meioPagamento });
       const idx = state.lancamentos.findIndex((l) => l.id === state.editingId);
       if (idx !== -1) state.lancamentos[idx] = updated;
       toast("Lançamento atualizado.");
@@ -1835,7 +1884,7 @@ async function saveManualEntry(prefill) {
         items.push({
           tipo, valor: parcelaValor, data: addMonthsISO(data, i),
           macrocategoria, microcategoria, descricao: `${descricao || macrocategoria} (parcela ${i+1}/${numParcelas})`,
-          conta, forma_entrada: "parcelado", parcelamento_id: parcelamento.id, comprovante_url: prefill?.comprovante_url || "",
+          conta, meio_pagamento: meioPagamento, forma_entrada: "parcelado", parcelamento_id: parcelamento.id, comprovante_url: prefill?.comprovante_url || "",
         });
       }
       const created = await apiBulkCreate("Lancamentos", items);
@@ -1844,7 +1893,7 @@ async function saveManualEntry(prefill) {
       toast(tipo === "receita" ? `Receita parcelada lançada em ${numParcelas}x.` : `Parcelamento lançado em ${numParcelas}x.`);
     } else {
       const created = await apiCreate("Lancamentos", {
-        tipo, valor, data, macrocategoria, microcategoria, descricao, conta,
+        tipo, valor, data, macrocategoria, microcategoria, descricao, conta, meio_pagamento: meioPagamento,
         forma_entrada: prefill?.forma_entrada || "manual", comprovante_url: prefill?.comprovante_url || "",
       });
       state.lancamentos = state.lancamentos.concat([created]);
@@ -1872,14 +1921,19 @@ Categorias existentes (prefira uma delas; combine macro e micro coerentemente):
 ${categoryContextText()}
 Data de hoje: ${todayISO()}
 Responda APENAS com um objeto JSON, sem markdown e sem texto extra, no formato exato:
-{"tipo":"despesa|receita","valor":numero,"macrocategoria":"...","microcategoria":"...","data":"AAAA-MM-DD","descricao":"texto curto","parcelado":true|false,"num_parcelas":numero,"confianca":"alta|media|baixa"}
+{"tipo":"despesa|receita","valor":numero,"macrocategoria":"...","microcategoria":"...","data":"AAAA-MM-DD","descricao":"texto curto","parcelado":true|false,"num_parcelas":numero,"meio_pagamento":"Pix|Cartão de Crédito|Desconto em Folha|","confianca":"alta|media|baixa"}
 Se a data não for mencionada, use a data de hoje. "valor" deve ser apenas o número, sem símbolo de moeda.
 Regras para lançamentos parcelados/fracionados, que valem tanto para despesas (compras parceladas) quanto para receitas (recebimentos fracionados em vários meses):
 - Despesa parcelada, ex.: "comprei uma TV em 10 prestações de 250 reais", "parcelei em 5x de 100", "paguei em 3 vezes" → tipo="despesa", parcelado=true.
 - Receita parcelada/fracionada, ex.: "vendi algo e vou receber 100 reais por mês nos próximos 10 meses", "vou receber esse valor em 5 parcelas", "recebimento fracionado em 4x" → tipo="receita", parcelado=true.
 - "num_parcelas" deve ser a quantidade de parcelas/meses mencionada.
 - "valor" deve ser sempre o valor TOTAL (soma de todas as parcelas), nunca o valor de uma parcela isolada. Se a pessoa falar o valor de cada parcela (ex.: "10 prestações de 250 reais" ou "100 reais por mês por 10 meses"), multiplique: valor = num_parcelas × valor_de_cada_parcela (nesses exemplos, valor = 2500 e 1000). Se a pessoa já falar o valor total (ex.: "parcelei uma compra de 2500 em 10x"), use esse total direto.
-- Se não for parcelado/fracionado, "parcelado" deve ser false e "num_parcelas" deve ser 1.`;
+- Se não for parcelado/fracionado, "parcelado" deve ser false e "num_parcelas" deve ser 1.
+Regra para "meio_pagamento" — só se aplica quando tipo="despesa":
+- Use "Pix" se a pessoa mencionar pix.
+- Use "Cartão de Crédito" se mencionar cartão de crédito, cartão, ou "no crédito".
+- Use "Desconto em Folha" se mencionar desconto em folha, descontado do salário/contracheque.
+- Se não for possível identificar, ou se tipo="receita", deixe "meio_pagamento" como string vazia "".`;
 }
 function parseAIJson(text) {
   try { return JSON.parse(text.trim()); } catch (e) {}
