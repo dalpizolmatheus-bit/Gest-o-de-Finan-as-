@@ -18,6 +18,7 @@ const SHEETS = {
   CATEGORIAS: "Categorias",
   PARCELAMENTOS: "Parcelamentos",
   INVESTIMENTOS: "Investimentos",
+  MOVIMENTACOES: "Movimentacoes",
 };
 
 const HEADERS = {
@@ -33,6 +34,14 @@ const HEADERS = {
   ],
   [SHEETS.INVESTIMENTOS]: [
     "id", "banco", "saldo", "observacao", "criado_em", "atualizado_em",
+  ],
+  // movimentações de contas de investimento: aporte, retirada, rendimento ou
+  // transferência entre contas (conta_destino_id só é usado nesse último caso).
+  // lancamento_id: só é usado quando tipo="rendimento" — aponta para o lançamento
+  // de receita criado junto, pra ele contar nos indicadores de Mês/Geral.
+  [SHEETS.MOVIMENTACOES]: [
+    "id", "data", "conta_id", "tipo", "valor", "conta_destino_id",
+    "descricao", "criado_em", "lancamento_id",
   ],
 };
 
@@ -68,6 +77,7 @@ function doGet(e) {
           [SHEETS.CATEGORIAS]: listRows_(SHEETS.CATEGORIAS),
           [SHEETS.PARCELAMENTOS]: listRows_(SHEETS.PARCELAMENTOS),
           [SHEETS.INVESTIMENTOS]: listRows_(SHEETS.INVESTIMENTOS),
+          [SHEETS.MOVIMENTACOES]: listRows_(SHEETS.MOVIMENTACOES),
         },
       });
     }

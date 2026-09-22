@@ -342,6 +342,7 @@ const state = {
   categorias: [],
   parcelamentos: [],
   investimentos: [],
+  movimentacoes: [],
   loaded: false,
   loading: false,
   lastError: null,
@@ -351,10 +352,15 @@ const state = {
   geralPeriodType: "trimestre",
   geralYear: currentYear(),
   geralQuarter: currentQuarter(),
+  investPeriodType: "trimestre",
+  investYear: currentYear(),
+  investQuarter: currentQuarter(),
+  investMonth: currentMonthKey(),
   filter: { mode: "mes", month: currentMonthKey(), year: currentYear(), macro: "" },
   charts: {},
   sheetMode: "manual",
   editingId: null,
+  editingMovId: null,
   mediaRecorder: null,
   audioChunks: [],
   recognizer: null,
@@ -364,7 +370,7 @@ const state = {
 function loadConfig() {
   try {
     return Object.assign({
-      sheetsUrl: "https://script.google.com/macros/s/AKfycby51UP4gaTR6adrs1ufWxTl0MwKjdeE87FUZiMo-88H4GbL69n65tTRYd-YOvvY4xpk/exec",
+      sheetsUrl: "https://script.google.com/macros/s/AKfycbxNHaHuXE51tV2OYbSnG-quMMnLzOraR76w8ccovRhLo8nXd5sS5vUB6dsNMYIUx1bO/exec",
       aiProvider: "none",
       aiApiKey: "",
       aiModelText: "gpt-4o-mini",
@@ -383,7 +389,7 @@ function saveCache() {
   try {
     localStorage.setItem(LS_CACHE, JSON.stringify({
       lancamentos: state.lancamentos, categorias: state.categorias, parcelamentos: state.parcelamentos,
-      investimentos: state.investimentos
+      investimentos: state.investimentos, movimentacoes: state.movimentacoes
     }));
   } catch (e) { /* quota — ignora */ }
 }
@@ -410,6 +416,26 @@ function periodoMonthKeys() {
     return Array.from({length:12}, (_,i) => `${state.geralYear}-${String(i+1).padStart(2,"0")}`);
   }
   return quarterMonths(state.geralQuarter).map((m) => `${state.geralYear}-${String(m).padStart(2,"0")}`);
+}
+// período (mês/trimestre/ano) usado no card "Evolução do patrimônio" da aba Investimentos —
+// independente do filtro de Painel Geral, com seu próprio estado (investPeriodType/Year/Quarter/Month).
+function investPeriodMonthKeys() {
+  if (state.investPeriodType === "mes") return [state.investMonth];
+  if (state.investPeriodType === "ano") {
+    return Array.from({length:12}, (_,i) => `${state.investYear}-${String(i+1).padStart(2,"0")}`);
+  }
+  return quarterMonths(state.investQuarter).map((m) => `${state.investYear}-${String(m).padStart(2,"0")}`);
+}
+function investPeriodLabel() {
+  if (state.investPeriodType === "mes") return monthLabel(state.investMonth);
+  if (state.investPeriodType === "ano") return String(state.investYear);
+  return quarterLabel(state.investYear, state.investQuarter);
+}
+function shiftInvestPeriod(n) {
+  if (state.investPeriodType === "mes") { state.investMonth = shiftMonthKey(state.investMonth, n); return; }
+  if (state.investPeriodType === "ano") { state.investYear += n; return; }
+  const s = shiftQuarter(state.investYear, state.investQuarter, n);
+  state.investYear = s.year; state.investQuarter = s.quarter;
 }
 // mesmo período, um ano ou um trimestre antes do que está selecionado agora
 // (pra comparação: ano atual x ano anterior, trimestre atual x trimestre anterior).
@@ -544,6 +570,7 @@ async function refreshData(showToast) {
     state.categorias = data.Categorias || [];
     state.parcelamentos = data.Parcelamentos || [];
     state.investimentos = data.Investimentos || [];
+    state.movimentacoes = data.Movimentacoes || [];
     state.loaded = true;
     state.lastError = null;
     saveCache();
@@ -718,8 +745,8 @@ function renderPainelMes(root) {
     </div>
 
     <div class="card">
-      <h2>Lançamentos recentes</h2>
-      <div id="recent-list">${renderList(state.lancamentos.slice().sort(byDataDesc).slice(0, 8))}</div>
+      <h2>Lançamentos recentes — ${mkLabel}</h2>
+      <div id="recent-list">${doMes.length ? renderList(doMes.slice().sort(byDataDesc).slice(0, 8)) : `<div class="empty-state"><div class="big">📭</div>Nenhum lançamento neste mês ainda.</div>`}</div>
     </div>
 
     <div class="card">
@@ -1448,6 +1475,16 @@ function renderInvestimentos(root, actions) {
   const contas = state.investimentos.slice().sort((a, b) => (Number(b.saldo) || 0) - (Number(a.saldo) || 0));
   const total = contas.reduce((acc, c) => acc + (Number(c.saldo) || 0), 0);
 
+  const invKeys = investPeriodMonthKeys();
+  const invKeysSet = new Set(invKeys);
+  const movDoPeriodo = state.movimentacoes.filter((m) => invKeysSet.has(monthKey(m.data))).slice().sort(byDataDesc);
+
+  const porMes = movimentacoesPorTipoEMes(invKeys);
+  const totAportes = invKeys.reduce((acc, k) => acc + porMes[k].aporte, 0);
+  const totRetiradas = invKeys.reduce((acc, k) => acc + porMes[k].retirada, 0);
+  const totRendimentos = invKeys.reduce((acc, k) => acc + porMes[k].rendimento, 0);
+  const temMovNoPeriodo = totAportes > 0 || totRetiradas > 0 || totRendimentos > 0;
+
   root.innerHTML = `
     ${state.loading ? `<div class="muted" style="margin-bottom:8px;">Atualizando…</div>` : ""}
     ${state.lastError ? `<div class="banner warn">${escapeHTML(state.lastError)}</div>` : ""}
@@ -1469,7 +1506,7 @@ function renderInvestimentos(root, actions) {
           <div class="li-right">
             <span class="amount positive">${formatBRL(c.saldo)}</span>
             <span class="li-actions" style="display:flex;">
-              <button data-act="juros" title="Lançar juros">💹</button>
+              <button data-act="nova-mov" title="Nova movimentação nesta conta">↕</button>
               <button data-act="edit-saldo" title="Editar saldo">✎</button>
               <button data-act="del-conta" title="Excluir">🗑</button>
             </span>
@@ -1478,14 +1515,48 @@ function renderInvestimentos(root, actions) {
         : `<div class="empty-state"><div class="big">🏦</div>Nenhuma conta cadastrada ainda.</div>`}
       <button class="btn btn-outline" id="add-conta-btn" style="margin-top:12px;">+ Nova conta</button>
     </div>
+
+    <div class="card">
+      <h2>Movimentações</h2>
+      <p class="secondary" style="font-size:0.86rem; margin-bottom:10px;">Aportes, retiradas, rendimentos e transferências entre suas contas — separado das despesas e receitas do dia a dia.</p>
+      <div class="segmented" id="inv-period-toggle" style="margin-bottom:10px;">
+        <button data-period="mes" class="${state.investPeriodType==="mes"?"active":""}">Mês</button>
+        <button data-period="trimestre" class="${state.investPeriodType==="trimestre"?"active":""}">Trimestre</button>
+        <button data-period="ano" class="${state.investPeriodType==="ano"?"active":""}">Ano</button>
+      </div>
+      <div style="display:flex; align-items:center; justify-content:center; gap:10px; margin-bottom:12px;">
+        <button class="icon-btn" id="inv-prev">‹</button>
+        <span class="secondary" id="inv-period-label" style="font-size:0.85rem; min-width:150px; text-align:center;">${escapeHTML(investPeriodLabel())}</span>
+        <button class="icon-btn" id="inv-next">›</button>
+      </div>
+      <button class="btn btn-primary" id="add-mov-btn" ${contas.length ? "" : "disabled"} style="margin-bottom:12px;">+ Nova movimentação</button>
+      ${contas.length === 0 ? `<p class="muted">Cadastre uma conta acima para começar a lançar.</p>` : movDoPeriodo.length
+        ? `<div id="mov-list">${renderMovList(movDoPeriodo, true)}</div>`
+        : `<div class="empty-state"><div class="big">↕</div>Nenhuma movimentação neste período.</div>`}
+    </div>
+
+    <div class="card">
+      <h2>Evolução do patrimônio — ${escapeHTML(investPeriodLabel())}</h2>
+      <div class="stat-row">
+        <div class="stat-tile"><div class="label">Aportes</div><div class="value positive" style="font-size:1.05rem;">${formatBRL(totAportes)}</div></div>
+        <div class="stat-tile"><div class="label">Retiradas</div><div class="value negative" style="font-size:1.05rem;">${formatBRL(totRetiradas)}</div></div>
+        <div class="stat-tile"><div class="label">Rendimentos</div><div class="value" style="font-size:1.05rem; color:${cssVar('--series-1')};">${formatBRL(totRendimentos)}</div></div>
+      </div>
+      ${temMovNoPeriodo ? `
+      <p class="muted" style="margin:2px 0 6px;">Variação líquida por mês (aportes + rendimentos − retiradas)</p>
+      <div class="chart-wrap"><canvas id="chart-inv-evolucao"></canvas></div>
+      <p class="muted" style="margin:14px 0 6px;">Aportes x rendimentos por mês</p>
+      <div class="chart-wrap"><canvas id="chart-inv-aportes-rend"></canvas></div>
+      ` : `<div class="empty-state"><div class="big">📈</div>Sem movimentações neste período.</div>`}
+    </div>
   `;
 
   document.getElementById("add-conta-btn").addEventListener("click", addContaInvestimento);
-  root.querySelectorAll('[data-act="juros"]').forEach((btn) => {
+  document.getElementById("add-mov-btn").addEventListener("click", () => openMovSheet(null));
+  root.querySelectorAll('[data-act="nova-mov"]').forEach((btn) => {
     btn.addEventListener("click", (e) => {
       const id = e.target.closest(".list-item").dataset.id;
-      const conta = state.investimentos.find((c) => c.id === id);
-      if (conta) lancarJuros(conta);
+      openMovSheet(null, id);
     });
   });
   root.querySelectorAll('[data-act="edit-saldo"]').forEach((btn) => {
@@ -1500,7 +1571,7 @@ function renderInvestimentos(root, actions) {
       const id = e.target.closest(".list-item").dataset.id;
       const conta = state.investimentos.find((c) => c.id === id);
       if (!conta) return;
-      if (!confirm(`Excluir a conta "${conta.banco}"? Os lançamentos de juros já feitos não são apagados.`)) return;
+      if (!confirm(`Excluir a conta "${conta.banco}"? As movimentações já feitas não são apagadas.`)) return;
       try {
         await apiDelete("Investimentos", id);
         state.investimentos = state.investimentos.filter((c) => c.id !== id);
@@ -1510,6 +1581,18 @@ function renderInvestimentos(root, actions) {
       } catch (err) { toast("Erro ao excluir: " + err.message); }
     });
   });
+  wireMovimentacoesListActions(() => true, "Todas as movimentações", { rerenderTab: true });
+
+  root.querySelectorAll("#inv-period-toggle button").forEach((b) => {
+    b.addEventListener("click", () => { state.investPeriodType = b.dataset.period; renderCurrentTab(); });
+  });
+  document.getElementById("inv-prev").onclick = () => { shiftInvestPeriod(-1); renderCurrentTab(); };
+  document.getElementById("inv-next").onclick = () => { shiftInvestPeriod(1); renderCurrentTab(); };
+
+  if (temMovNoPeriodo) {
+    drawEvolucaoPatrimonioChart(invKeys);
+    drawAportesRendimentosChart(invKeys);
+  }
 }
 
 async function addContaInvestimento() {
@@ -1541,54 +1624,340 @@ async function editarSaldoConta(conta) {
   } catch (err) { toast("Erro ao atualizar: " + err.message); }
 }
 
-async function lancarJuros(conta) {
-  const valorStr = prompt(`Ganho de juros em "${conta.banco}" (R$):`, "0,00");
-  if (valorStr === null) return;
-  const valor = parseValorInput(valorStr);
-  if (!valor || valor <= 0) { toast("Informe um valor válido."); return; }
-  const hoje = todayISO();
-  let created;
-  try {
-    await ensureCategoriaJuros();
-    created = await apiCreate("Lancamentos", {
-      tipo: "receita", valor, data: hoje, macrocategoria: "Receita", microcategoria: "Juros",
-      descricao: `Juros — ${conta.banco}`, conta: conta.banco, forma_entrada: "manual",
-    });
-  } catch (err) {
-    toast("Erro ao lançar juros: " + err.message);
-    return;
+/* ---------- MOVIMENTAÇÕES (aporte / retirada / rendimento / transferência) ---------- */
+function contaNome(id) {
+  const c = state.investimentos.find((x) => x.id === id);
+  return c ? (c.banco || "—") : "—";
+}
+function movTipoLabel(tipo) {
+  return { aporte: "Aporte", retirada: "Retirada", rendimento: "Rendimento", transferencia: "Transferência" }[tipo] || tipo;
+}
+function movTipoColor(tipo) {
+  if (tipo === "aporte") return cssVar("--good");
+  if (tipo === "rendimento") return cssVar("--series-1");
+  if (tipo === "retirada") return cssVar("--critical");
+  return cssVar("--series-7"); // transferência
+}
+// efeito de cada tipo de movimentação sobre o saldo: sinal aplicado ao valor,
+// na conta de origem (conta_id) e, só no caso de transferência, na de destino.
+function saldoEfeito(tipo) {
+  if (tipo === "aporte" || tipo === "rendimento") return { origem: 1, destino: 0 };
+  if (tipo === "retirada") return { origem: -1, destino: 0 };
+  if (tipo === "transferencia") return { origem: -1, destino: 1 };
+  return { origem: 0, destino: 0 };
+}
+async function ajustarSaldoConta_(contaId, delta) {
+  if (!contaId || !delta) return;
+  const idx = state.investimentos.findIndex((c) => c.id === contaId);
+  if (idx === -1) return;
+  const novoSaldo = (Number(state.investimentos[idx].saldo) || 0) + delta;
+  const updated = await apiUpdate("Investimentos", contaId, { saldo: novoSaldo, atualizado_em: new Date().toISOString() });
+  state.investimentos[idx] = updated;
+}
+async function applyMovimentoSaldo(mov) {
+  const efeito = saldoEfeito(mov.tipo);
+  await ajustarSaldoConta_(mov.conta_id, efeito.origem * mov.valor);
+  if (mov.conta_destino_id) await ajustarSaldoConta_(mov.conta_destino_id, efeito.destino * mov.valor);
+}
+async function reverseMovimentoSaldo(mov) {
+  const efeito = saldoEfeito(mov.tipo);
+  await ajustarSaldoConta_(mov.conta_id, -efeito.origem * mov.valor);
+  if (mov.conta_destino_id) await ajustarSaldoConta_(mov.conta_destino_id, -efeito.destino * mov.valor);
+}
+// Aporte é sobra do mês indo pra dentro da conta — dinheiro que já apareceu como
+// receita antes, então não deve contar de novo. Rendimento é ganho novo (juros/lucro),
+// então além de mexer no saldo da conta ele também deve valer como receita nos
+// indicadores de Painel Mês/Geral — por isso mantemos um lançamento de receita
+// "grudado" nele (via lancamento_id), criado/atualizado/apagado junto.
+// `mov` é o estado NOVO (após a edição); `oldMov` é o estado anterior (ou null se é criação).
+// Retorna o lancamento_id que deve ser salvo na movimentação.
+async function syncLancamentoRendimento(mov, oldMov) {
+  const eraRendimento = oldMov && oldMov.tipo === "rendimento";
+  const eRendimento = mov.tipo === "rendimento";
+  const lancIdAnterior = oldMov && oldMov.lancamento_id;
+
+  if (!eRendimento) {
+    if (eraRendimento && lancIdAnterior) {
+      try {
+        await apiDelete("Lancamentos", lancIdAnterior);
+        state.lancamentos = state.lancamentos.filter((l) => l.id !== lancIdAnterior);
+      } catch (err) { /* se já não existir mais, ignora */ }
+    }
+    return "";
   }
-  // o lançamento já foi criado na planilha — garante que ele fica visível
-  // mesmo que a atualização do saldo abaixo falhe.
+
+  const payload = {
+    tipo: "receita", valor: mov.valor, data: mov.data, macrocategoria: "Receita", microcategoria: "Juros",
+    descricao: mov.descricao || `Rendimento — ${contaNome(mov.conta_id)}`, conta: contaNome(mov.conta_id), forma_entrada: "manual",
+  };
+  if (eraRendimento && lancIdAnterior) {
+    const updated = await apiUpdate("Lancamentos", lancIdAnterior, payload);
+    const idx = state.lancamentos.findIndex((l) => l.id === lancIdAnterior);
+    if (idx !== -1) state.lancamentos[idx] = updated; else state.lancamentos = state.lancamentos.concat([updated]);
+    return lancIdAnterior;
+  }
+  const created = await apiCreate("Lancamentos", payload);
   state.lancamentos = state.lancamentos.concat([created]);
-  saveCache();
-
-  try {
-    const novoSaldo = (Number(conta.saldo) || 0) + valor;
-    const updated = await apiUpdate("Investimentos", conta.id, { saldo: novoSaldo, atualizado_em: new Date().toISOString() });
-    const idx = state.investimentos.findIndex((c) => c.id === conta.id);
-    if (idx !== -1) state.investimentos[idx] = updated;
-    saveCache();
-  } catch (errSaldo) {
-    toast("Juros lançados, mas não consegui atualizar o saldo da conta: " + errSaldo.message);
-  }
-
-  // leva direto para Lançamentos, no mês de hoje e sem filtro de categoria,
-  // para o juros lançado aparecer na hora — sem isso ele podia ficar
-  // escondido atrás de um filtro de mês/categoria deixado de uma visita anterior.
-  state.filter.month = monthKey(hoje);
-  state.filter.macro = "";
-  toast("Juros lançados como receita do mês.");
-  switchTab("lancamentos");
+  return created.id;
+}
+// soma aporte/retirada/rendimento por mês (chaves em invKeys); transferência entre
+// contas próprias não entra aqui porque não muda o patrimônio total, só a distribuição.
+function movimentacoesPorTipoEMes(keys) {
+  const byMonth = {};
+  keys.forEach((k) => { byMonth[k] = { aporte: 0, retirada: 0, rendimento: 0 }; });
+  state.movimentacoes.forEach((m) => {
+    const k = monthKey(m.data);
+    if (!byMonth[k]) return;
+    if (m.tipo === "aporte") byMonth[k].aporte += Number(m.valor) || 0;
+    else if (m.tipo === "retirada") byMonth[k].retirada += Number(m.valor) || 0;
+    else if (m.tipo === "rendimento") byMonth[k].rendimento += Number(m.valor) || 0;
+  });
+  return byMonth;
 }
 
-async function ensureCategoriaJuros() {
-  const exists = state.categorias.some((c) => c.macrocategoria === "Receita" && c.microcategoria === "Juros");
-  if (exists) return;
+function renderMovList(list, withActions) {
+  return list.map((m) => `
+    <div class="list-item" data-id="${escapeHTML(m.id)}">
+      <div class="li-left">
+        <span class="dot" style="background:${movTipoColor(m.tipo)}"></span>
+        <div class="li-text">
+          <div class="cat">${escapeHTML(movTipoLabel(m.tipo))}</div>
+          <div class="sub">${m.tipo === "transferencia"
+            ? `${escapeHTML(contaNome(m.conta_id))} → ${escapeHTML(contaNome(m.conta_destino_id))}`
+            : escapeHTML(contaNome(m.conta_id))} · ${shortDate(m.data)}${m.descricao ? " · " + escapeHTML(m.descricao) : ""}</div>
+        </div>
+      </div>
+      <div class="li-right">
+        <span class="amount ${m.tipo === "retirada" ? "negative" : "positive"}">${m.tipo === "retirada" ? "−" : "+"} ${formatBRL(m.valor)}</span>
+        ${withActions ? `<span class="li-actions" style="display:flex;"><button data-act="edit-mov" title="Editar">✎</button><button data-act="del-mov" title="Excluir">🗑</button></span>` : ""}
+      </div>
+    </div>`).join("");
+}
+/* mostra, numa folha, uma lista de movimentações filtrada — usada ao tocar nas barras
+   dos gráficos de evolução/aportes x rendimentos. */
+function showMovimentacoesGenerico(filterFn, titulo) {
+  const list = state.movimentacoes.filter(filterFn).slice().sort(byDataDesc);
+  document.getElementById("sheet-content").innerHTML = `
+    <div class="sheet-title">${escapeHTML(titulo)}</div>
+    <div class="muted" style="margin-bottom:10px;">${list.length} movimentaç${list.length === 1 ? "ão" : "ões"}</div>
+    ${list.length ? renderMovList(list, true) : `<div class="empty-state"><div class="big">📭</div>Nenhuma movimentação.</div>`}
+  `;
+  document.getElementById("sheet-overlay").classList.remove("hidden");
+  wireMovimentacoesListActions(filterFn, titulo, { inSheet: true });
+}
+// with `inSheet: true`, também refaz a listagem dentro da própria folha depois de excluir
+// (como wireGenericoListActions); com `rerenderTab: true` (uso na própria aba Investimentos),
+// só re-renderiza a aba de trás.
+function wireMovimentacoesListActions(filterFn, titulo, opts) {
+  opts = opts || {};
+  const container = opts.inSheet ? document.getElementById("sheet-content") : document.getElementById("view-root");
+  container.querySelectorAll('[data-act="edit-mov"]').forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      const id = e.target.closest(".list-item").dataset.id;
+      const item = state.movimentacoes.find((m) => m.id === id);
+      if (item) openMovSheet(item);
+    });
+  });
+  container.querySelectorAll('[data-act="del-mov"]').forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      const id = e.target.closest(".list-item").dataset.id;
+      const item = state.movimentacoes.find((m) => m.id === id);
+      if (!item) return;
+      if (!confirm("Excluir esta movimentação? O saldo da conta volta ao que era antes dela.")) return;
+      try {
+        await reverseMovimentoSaldo(item);
+        if (item.tipo === "rendimento" && item.lancamento_id) {
+          try {
+            await apiDelete("Lancamentos", item.lancamento_id);
+            state.lancamentos = state.lancamentos.filter((l) => l.id !== item.lancamento_id);
+          } catch (err) { /* se já não existir mais, ignora */ }
+        }
+        await apiDelete("Movimentacoes", id);
+        state.movimentacoes = state.movimentacoes.filter((m) => m.id !== id);
+        saveCache();
+        toast("Movimentação excluída.");
+        renderCurrentTab();
+        if (opts.inSheet) showMovimentacoesGenerico(filterFn, titulo);
+      } catch (err) { toast("Erro ao excluir: " + err.message); }
+    });
+  });
+}
+
+function openMovSheet(prefillMov, contaIdPadrao) {
+  state.editingMovId = prefillMov ? prefillMov.id : null;
+  document.getElementById("sheet-overlay").classList.remove("hidden");
+  const prefill = prefillMov || (contaIdPadrao ? { conta_id: contaIdPadrao } : null);
+  document.getElementById("sheet-content").innerHTML = movFormHTML(prefill);
+  wireMovForm(prefill);
+}
+function movFormHTML(prefill) {
+  const p = prefill || {};
+  const tipo = p.tipo || "aporte";
+  const contas = state.investimentos;
+  if (!contas.length) {
+    return `<div class="sheet-title">Nova movimentação</div><p class="secondary" style="font-size:0.9rem;">Cadastre uma conta em "Suas contas" antes de lançar uma movimentação.</p>`;
+  }
+  return `
+    <div class="sheet-title">${state.editingMovId ? "Editar movimentação" : "Nova movimentação"}</div>
+
+    <label class="field-label">Tipo</label>
+    <select id="mov-tipo">
+      <option value="aporte" ${tipo === "aporte" ? "selected" : ""}>Aporte</option>
+      <option value="retirada" ${tipo === "retirada" ? "selected" : ""}>Retirada</option>
+      <option value="rendimento" ${tipo === "rendimento" ? "selected" : ""}>Rendimento (juros/ganhos)</option>
+      <option value="transferencia" ${tipo === "transferencia" ? "selected" : ""}>Transferência entre contas</option>
+    </select>
+
+    <label class="field-label" id="mov-conta-label">Conta</label>
+    <select id="mov-conta">
+      ${contas.map((c) => `<option value="${escapeHTML(c.id)}" ${p.conta_id === c.id ? "selected" : ""}>${escapeHTML(c.banco)}</option>`).join("")}
+    </select>
+
+    <div id="mov-conta-destino-field" class="${tipo === "transferencia" ? "" : "hidden"}">
+      <label class="field-label">Conta de destino</label>
+      <select id="mov-conta-destino">
+        ${contas.map((c) => `<option value="${escapeHTML(c.id)}" ${p.conta_destino_id === c.id ? "selected" : ""}>${escapeHTML(c.banco)}</option>`).join("")}
+      </select>
+    </div>
+
+    <label class="field-label">Valor (R$)</label>
+    <input type="text" inputmode="decimal" id="mov-valor" placeholder="0,00" value="${p.valor !== undefined ? String(p.valor).replace(".", ",") : ""}" />
+
+    <label class="field-label">Data</label>
+    <input type="date" id="mov-data" value="${p.data || todayISO()}" />
+
+    <label class="field-label">Descrição (opcional)</label>
+    <input type="text" id="mov-desc" value="${escapeHTML(p.descricao || "")}" placeholder="Ex: sobra do mês" />
+
+    <button class="btn btn-primary" id="btn-save-mov" style="margin-top:16px;">${state.editingMovId ? "Salvar alterações" : "Lançar movimentação"}</button>
+  `;
+}
+function wireMovForm(prefill) {
+  if (!state.investimentos.length) return;
+  const tipoSel = document.getElementById("mov-tipo");
+  const contaLabel = document.getElementById("mov-conta-label");
+  const destinoField = document.getElementById("mov-conta-destino-field");
+  function applyTipoUI() {
+    const t = tipoSel.value;
+    destinoField.classList.toggle("hidden", t !== "transferencia");
+    contaLabel.textContent = t === "transferencia" ? "Conta de origem" : (t === "retirada" ? "Sai de" : "Conta");
+  }
+  tipoSel.addEventListener("change", applyTipoUI);
+  applyTipoUI();
+  document.getElementById("btn-save-mov").addEventListener("click", () => saveMovimentacao(prefill));
+}
+async function saveMovimentacao(prefill) {
+  const btn = document.getElementById("btn-save-mov");
+  if (!btn) return;
+  btn.disabled = true;
   try {
-    const created = await apiCreate("Categorias", { macrocategoria: "Receita", microcategoria: "Juros", ativa: true });
-    state.categorias = state.categorias.concat([created]);
-  } catch (err) { /* categoria pode já existir na planilha; ignora erro silenciosamente */ }
+    const tipo = document.getElementById("mov-tipo").value;
+    const contaId = document.getElementById("mov-conta").value;
+    const contaDestinoId = tipo === "transferencia" ? document.getElementById("mov-conta-destino").value : "";
+    const valor = parseValorInput(document.getElementById("mov-valor").value);
+    const data = document.getElementById("mov-data").value || todayISO();
+    const descricao = document.getElementById("mov-desc").value.trim();
+
+    if (!valor || valor <= 0) { toast("Informe um valor válido."); btn.disabled = false; return; }
+    if (tipo === "transferencia" && (!contaDestinoId || contaDestinoId === contaId)) {
+      toast("Escolha duas contas diferentes para a transferência."); btn.disabled = false; return;
+    }
+
+    if (state.editingMovId) {
+      const old = state.movimentacoes.find((m) => m.id === state.editingMovId);
+      if (old) await reverseMovimentoSaldo(old);
+      const novo = { tipo, conta_id: contaId, conta_destino_id: contaDestinoId, valor, data, descricao };
+      await applyMovimentoSaldo(novo);
+      const lancamentoId = await syncLancamentoRendimento(novo, old);
+      const updated = await apiUpdate("Movimentacoes", state.editingMovId, { data, conta_id: contaId, tipo, valor, conta_destino_id: contaDestinoId, descricao, lancamento_id: lancamentoId });
+      const idx = state.movimentacoes.findIndex((m) => m.id === state.editingMovId);
+      if (idx !== -1) state.movimentacoes[idx] = updated;
+      toast("Movimentação atualizada.");
+    } else {
+      const lancamentoId = await syncLancamentoRendimento({ tipo, conta_id: contaId, valor, data, descricao }, null);
+      const created = await apiCreate("Movimentacoes", { data, conta_id: contaId, tipo, valor, conta_destino_id: contaDestinoId, descricao, lancamento_id: lancamentoId });
+      state.movimentacoes = state.movimentacoes.concat([created]);
+      await applyMovimentoSaldo(created);
+      toast(tipo === "rendimento" ? "Movimentação lançada — também contou como receita do mês." : "Movimentação lançada.");
+    }
+    saveCache();
+    closeSheet();
+    renderCurrentTab();
+  } catch (err) {
+    toast("Erro ao salvar: " + err.message);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+function drawEvolucaoPatrimonioChart(keys) {
+  destroyChart("invEvolucao");
+  const porMes = movimentacoesPorTipoEMes(keys);
+  const variacoes = keys.map((k) => porMes[k].aporte + porMes[k].rendimento - porMes[k].retirada);
+  const ctx = document.getElementById("chart-inv-evolucao");
+  if (!ctx) return;
+  const colors = variacoes.map((v) => v >= 0 ? cssVar("--good") : cssVar("--critical"));
+
+  state.charts.invEvolucao = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels: keys.map((k) => monthLabel(k).slice(0, 3)),
+      datasets: [{ data: variacoes, backgroundColor: colors, borderRadius: 4, maxBarThickness: 30 }],
+    },
+    options: Object.assign({}, chartBaseOptions({ legend: false }), {
+      plugins: { legend: { display: false }, tooltip: tooltipStyle((c) => formatBRL(c.raw)) },
+      onClick: (evt, _els, chart) => {
+        const points = chart.getElementsAtEventForMode(evt, "nearest", { intersect: true }, true);
+        if (!points.length) return;
+        const mk = keys[points[0].index];
+        showMovimentacoesGenerico((m) => monthKey(m.data) === mk, "Movimentações — " + monthLabel(mk));
+      },
+      onHover: pointerCursorOnHover,
+    }),
+  });
+  state.charts.invEvolucao.canvas.addEventListener("dblclick", (evt) => {
+    const points = state.charts.invEvolucao.getElementsAtEventForMode(evt, "nearest", { intersect: true }, true);
+    if (!points.length) return;
+    const mk = keys[points[0].index];
+    showMovimentacoesGenerico((m) => monthKey(m.data) === mk, "Movimentações — " + monthLabel(mk));
+  });
+}
+
+function drawAportesRendimentosChart(keys) {
+  destroyChart("invAportesRend");
+  const porMes = movimentacoesPorTipoEMes(keys);
+  const ctx = document.getElementById("chart-inv-aportes-rend");
+  if (!ctx) return;
+
+  state.charts.invAportesRend = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels: keys.map((k) => monthLabel(k).slice(0, 3)),
+      datasets: [
+        { label: "Aportes", data: keys.map((k) => porMes[k].aporte), backgroundColor: cssVar("--good"), borderRadius: 4, maxBarThickness: 18 },
+        { label: "Rendimentos", data: keys.map((k) => porMes[k].rendimento), backgroundColor: cssVar("--series-1"), borderRadius: 4, maxBarThickness: 18 },
+      ],
+    },
+    options: Object.assign({}, chartBaseOptions({ legend: true }), {
+      onClick: (evt, _els, chart) => {
+        const points = chart.getElementsAtEventForMode(evt, "nearest", { intersect: true }, true);
+        if (!points.length) return;
+        const { datasetIndex, index } = points[0];
+        const mk = keys[index];
+        const tipo = datasetIndex === 0 ? "aporte" : "rendimento";
+        showMovimentacoesGenerico((m) => monthKey(m.data) === mk && m.tipo === tipo, (tipo === "aporte" ? "Aportes" : "Rendimentos") + " — " + monthLabel(mk));
+      },
+      onHover: pointerCursorOnHover,
+    }),
+  });
+  state.charts.invAportesRend.canvas.addEventListener("dblclick", (evt) => {
+    const points = state.charts.invAportesRend.getElementsAtEventForMode(evt, "nearest", { intersect: true }, true);
+    if (!points.length) return;
+    const { datasetIndex, index } = points[0];
+    const mk = keys[index];
+    const tipo = datasetIndex === 0 ? "aporte" : "rendimento";
+    showMovimentacoesGenerico((m) => monthKey(m.data) === mk && m.tipo === tipo, (tipo === "aporte" ? "Aportes" : "Rendimentos") + " — " + monthLabel(mk));
+  });
 }
 
 /* ---------- CATEGORIAS ---------- */
@@ -1726,6 +2095,7 @@ function closeSheet() {
   overlay.classList.add("hidden");
   stopAudioCapture(true);
   state.editingId = null;
+  state.editingMovId = null;
 }
 function renderSheet(prefill) {
   const isEdit = !!state.editingId;
@@ -2219,7 +2589,7 @@ function escapeHTML(str) {
 /* ---------- init ---------- */
 (function init() {
   const cache = loadCache();
-  if (cache) { state.lancamentos = cache.lancamentos || []; state.categorias = cache.categorias || []; state.parcelamentos = cache.parcelamentos || []; state.investimentos = cache.investimentos || []; }
+  if (cache) { state.lancamentos = cache.lancamentos || []; state.categorias = cache.categorias || []; state.parcelamentos = cache.parcelamentos || []; state.investimentos = cache.investimentos || []; state.movimentacoes = cache.movimentacoes || []; }
   renderCurrentTab();
   if (apiUrl()) refreshData();
 
