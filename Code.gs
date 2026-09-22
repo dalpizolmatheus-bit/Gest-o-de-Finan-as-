@@ -62,7 +62,16 @@ function doGet(e) {
   try {
     if (action === "bootstrap") {
       bootstrap_();
-      return jsonOut_({ ok: true, message: "Planilha inicializada." });
+      // Diagnóstico: mostra a ordem REAL das colunas (linha 1) de cada aba
+      // depois do bootstrap, pra dar pra conferir visualmente na planilha
+      // se os rótulos batem com os dados de cada coluna.
+      const ss = SpreadsheetApp.getActiveSpreadsheet();
+      const headersAtuais = {};
+      Object.keys(HEADERS).forEach((name) => {
+        const sheet = ss.getSheetByName(name);
+        headersAtuais[name] = sheet ? getSheetHeaders_(sheet, name) : null;
+      });
+      return jsonOut_({ ok: true, message: "Planilha inicializada.", headers: headersAtuais });
     }
     if (action === "list") {
       const sheetName = requireSheetParam_(e);
@@ -92,6 +101,7 @@ function doPost(e) {
     const body = JSON.parse(e.postData.contents);
     const action = (body.action || "").toLowerCase();
     const sheetName = body.sheet;
+    bootstrap_(); // garante que as abas e colunas declaradas existem antes de gravar
 
     if (action === "create") {
       const row = createRow_(sheetName, body.data);
@@ -136,13 +146,36 @@ function bootstrap_() {
     if (!sheet) {
       sheet = ss.insertSheet(name);
     }
-    const headers = HEADERS[name];
-    const firstRow = sheet.getRange(1, 1, 1, headers.length).getValues()[0];
-    const hasHeaders = headers.every((h, i) => firstRow[i] === h);
-    if (!hasHeaders) {
-      sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    const declared = HEADERS[name];
+    const lastRow = sheet.getLastRow();
+    const lastCol = sheet.getLastColumn();
+
+    if (lastRow === 0 || lastCol === 0) {
+      // Aba totalmente vazia (recém-criada): escreve o cabeçalho completo.
+      sheet.getRange(1, 1, 1, declared.length).setValues([declared]);
       sheet.setFrozenRows(1);
+      return;
     }
+
+    const firstRow = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+    const liveNames = firstRow.map((v) => String(v || "").trim()).filter((v) => v !== "");
+
+    if (liveNames.length === 0) {
+      // Linha 1 existe mas está em branco (ex.: aba só com dados, sem cabeçalho).
+      sheet.getRange(1, 1, 1, declared.length).setValues([declared]);
+      sheet.setFrozenRows(1);
+      return;
+    }
+
+    // IMPORTANTE: nunca sobrescrever nem realinhar colunas que já existem —
+    // isso desalinharia os rótulos em relação aos dados já lançados. Só
+    // ACRESCENTAMOS, por nome, as colunas declaradas que ainda faltam,
+    // sempre em novas colunas ao final da planilha.
+    const faltando = declared.filter((h) => liveNames.indexOf(h) === -1);
+    if (faltando.length) {
+      sheet.getRange(1, lastCol + 1, 1, faltando.length).setValues([faltando]);
+    }
+    sheet.setFrozenRows(1);
   });
 
   const catSheet = ss.getSheetByName(SHEETS.CATEGORIAS);
@@ -169,9 +202,28 @@ function getSheet_(name) {
   return sheet;
 }
 
+// Lê o cabeçalho REAL (linha 1) da planilha e usa ele — por nome — para
+// mapear colunas, em vez de assumir que a ordem declarada em HEADERS bate
+// com a ordem física das colunas na planilha do usuário. Isso é o que evita
+// o desalinhamento: mesmo que bootstrap_ tenha, em versões antigas, corrido
+// atrás dos rótulos, aqui sempre respeitamos o que está fisicamente na
+// planilha. Cai no HEADERS declarado só se a aba estiver com a linha 1
+// completamente vazia (planilha nova, sem cabeçalho ainda).
+function getSheetHeaders_(sheet, name) {
+  const declared = HEADERS[name];
+  const lastCol = sheet.getLastColumn();
+  if (lastCol === 0) return declared.slice();
+  const firstRow = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  const live = firstRow.map((v) => String(v || "").trim());
+  let end = live.length;
+  while (end > 0 && live[end - 1] === "") end--;
+  const trimmed = live.slice(0, end);
+  return trimmed.length ? trimmed : declared.slice();
+}
+
 function listRows_(name) {
   const sheet = getSheet_(name);
-  const headers = HEADERS[name];
+  const headers = getSheetHeaders_(sheet, name);
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return [];
   const values = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
@@ -194,7 +246,7 @@ function rowToObject_(headers, row) {
 
 function createRow_(name, data) {
   const sheet = getSheet_(name);
-  const headers = HEADERS[name];
+  const headers = getSheetHeaders_(sheet, name);
   const id = data.id || Utilities.getUuid();
   const record = Object.assign({}, data, { id });
   if (headers.includes("criado_em") && !record.criado_em) {
@@ -219,7 +271,7 @@ function findRowIndexById_(sheet, headers, id) {
 
 function updateRow_(name, id, data) {
   const sheet = getSheet_(name);
-  const headers = HEADERS[name];
+  const headers = getSheetHeaders_(sheet, name);
   const rowIndex = findRowIndexById_(sheet, headers, id);
   if (rowIndex === -1) throw new Error("Registro não encontrado: " + id);
   const current = rowToObject_(headers, sheet.getRange(rowIndex, 1, 1, headers.length).getValues()[0]);
@@ -231,14 +283,14 @@ function updateRow_(name, id, data) {
 
 function deleteRow_(name, id) {
   const sheet = getSheet_(name);
-  const headers = HEADERS[name];
+  const headers = getSheetHeaders_(sheet, name);
   const rowIndex = findRowIndexById_(sheet, headers, id);
   if (rowIndex !== -1) sheet.deleteRow(rowIndex);
 }
 
 function deleteWhere_(name, field, value) {
   const sheet = getSheet_(name);
-  const headers = HEADERS[name];
+  const headers = getSheetHeaders_(sheet, name);
   const col = headers.indexOf(field);
   if (col === -1) return;
   const lastRow = sheet.getLastRow();
