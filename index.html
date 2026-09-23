@@ -2299,6 +2299,7 @@ function manualFormHTML(prefill) {
         <option value="" ${!p.meio_pagamento?"selected":""}>— não informado —</option>
         ${MEIO_PAGAMENTO_OPTS.map((m) => `<option value="${escapeHTML(m)}" ${p.meio_pagamento===m?"selected":""}>${escapeHTML(m)}</option>`).join("")}
       </select>
+      <p class="muted hidden" id="meio-pagamento-hint" style="margin-top:4px; font-size:0.78rem;">Selecione como foi pago para lançar.</p>
     </div>
 
     ${state.editingId ? "" : `
@@ -2329,6 +2330,19 @@ function wireManualForm(prefill) {
     if (prefill && prefill.macrocategoria && opts.includes(prefill.macrocategoria)) macroSel.value = prefill.macrocategoria;
     fillMicro(prefill ? prefill.microcategoria : null);
   }
+  // despesa exige informar como foi pago antes de liberar o botão de lançar/salvar
+  // (receita não passa por essa exigência, já que o campo nem se aplica a ela).
+  function updateSaveButtonState() {
+    const activeBtn = document.querySelector("#tipo-toggle button.active");
+    const activeTipo = activeBtn ? activeBtn.dataset.tipo : "despesa";
+    const meioSel = document.getElementById("f-meio-pagamento");
+    const hint = document.getElementById("meio-pagamento-hint");
+    const saveBtn = document.getElementById("btn-save-lanc");
+    const faltaMeioPagamento = activeTipo === "despesa" && meioSel && !meioSel.value;
+    if (saveBtn) saveBtn.disabled = faltaMeioPagamento;
+    if (hint) hint.classList.toggle("hidden", !faltaMeioPagamento);
+  }
+
   document.querySelectorAll("#tipo-toggle button").forEach((b) => {
     b.addEventListener("click", () => {
       document.querySelectorAll("#tipo-toggle button").forEach((x) => x.classList.remove("active","despesa","receita"));
@@ -2341,9 +2355,14 @@ function wireManualForm(prefill) {
       if (helperEl) helperEl.textContent = copy.helper;
       const meioPagField = document.getElementById("meio-pagamento-field");
       if (meioPagField) meioPagField.classList.toggle("hidden", b.dataset.tipo !== "despesa");
+      updateSaveButtonState();
     });
   });
   applyTipoFilter((prefill && prefill.tipo) || "despesa");
+
+  const meioPagSel = document.getElementById("f-meio-pagamento");
+  if (meioPagSel) meioPagSel.addEventListener("change", updateSaveButtonState);
+  updateSaveButtonState();
 
   macroSel.addEventListener("change", async () => {
     if (macroSel.value === "__new__") {
@@ -2383,6 +2402,7 @@ async function saveManualEntry(prefill) {
     const conta = document.getElementById("f-conta").value.trim();
     const meioPagamento = tipo === "despesa" ? (document.getElementById("f-meio-pagamento")?.value || "") : "";
     if (!valor || valor <= 0) { toast("Informe um valor válido."); btn.disabled = false; return; }
+    if (tipo === "despesa" && !meioPagamento) { toast("Selecione como foi pago antes de lançar."); btn.disabled = false; return; }
 
     if (state.editingId) {
       const updated = await apiUpdate("Lancamentos", state.editingId, { tipo, valor, data, macrocategoria, microcategoria, descricao, conta, meio_pagamento: meioPagamento });
