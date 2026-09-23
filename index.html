@@ -437,6 +437,36 @@ function shiftInvestPeriod(n) {
   const s = shiftQuarter(state.investYear, state.investQuarter, n);
   state.investYear = s.year; state.investQuarter = s.quarter;
 }
+function investGranularidadeLabel() {
+  if (state.investPeriodType === "mes") return "mês";
+  if (state.investPeriodType === "trimestre") return "trimestre";
+  return "ano";
+}
+// janela de períodos (mesma granularidade do filtro atual) terminando no período
+// selecionado, pra sempre dar pra comparar com os anteriores — mês x mês passado,
+// trimestre x trimestre passado, ano x ano passado — em vez de mostrar só 1 barra.
+function investTrailingPeriods() {
+  const periods = [];
+  if (state.investPeriodType === "mes") {
+    for (let i = 5; i >= 0; i--) {
+      const mk = shiftMonthKey(state.investMonth, -i);
+      periods.push({ end: mk, monthKeys: [mk], shortLabel: monthLabel(mk).slice(0, 3) + "/" + mk.slice(2, 4), label: monthLabel(mk) });
+    }
+  } else if (state.investPeriodType === "trimestre") {
+    for (let i = 5; i >= 0; i--) {
+      const s = shiftQuarter(state.investYear, state.investQuarter, -i);
+      const mks = quarterMonths(s.quarter).map((m) => `${s.year}-${String(m).padStart(2, "0")}`);
+      periods.push({ end: mks[mks.length - 1], monthKeys: mks, shortLabel: `${s.quarter}ºT/${String(s.year).slice(2)}`, label: quarterLabel(s.year, s.quarter) });
+    }
+  } else {
+    for (let i = 4; i >= 0; i--) {
+      const y = state.investYear - i;
+      const mks = Array.from({ length: 12 }, (_, idx) => `${y}-${String(idx + 1).padStart(2, "0")}`);
+      periods.push({ end: mks[mks.length - 1], monthKeys: mks, shortLabel: String(y), label: String(y) });
+    }
+  }
+  return periods;
+}
 // mesmo período, um ano ou um trimestre antes do que está selecionado agora
 // (pra comparação: ano atual x ano anterior, trimestre atual x trimestre anterior).
 function periodoAnteriorInfo() {
@@ -1483,7 +1513,19 @@ function renderInvestimentos(root, actions) {
   const totAportes = invKeys.reduce((acc, k) => acc + porMes[k].aporte, 0);
   const totRetiradas = invKeys.reduce((acc, k) => acc + porMes[k].retirada, 0);
   const totRendimentos = invKeys.reduce((acc, k) => acc + porMes[k].rendimento, 0);
-  const temMovNoPeriodo = totAportes > 0 || totRetiradas > 0 || totRendimentos > 0;
+
+  // janela de períodos (mesma granularidade do filtro) pra comparar o período
+  // selecionado com os anteriores — patrimônio total e aportes/rendimentos/retiradas.
+  const periods = investTrailingPeriods();
+  const patrimonioSeries = investPatrimonioPorPeriodo(periods, total);
+  const porPeriodo = movimentacoesPorTipoEPeriodo(periods);
+  const curIdx = periods.length - 1;
+  const prevIdx = curIdx - 1;
+  const patrimonioAtual = patrimonioSeries[curIdx];
+  const patrimonioAnterior = prevIdx >= 0 ? patrimonioSeries[prevIdx] : null;
+  const deltaPatrimonio = patrimonioAnterior !== null ? patrimonioAtual - patrimonioAnterior : null;
+  const deltaPatrimonioPct = (patrimonioAnterior !== null && Math.abs(patrimonioAnterior) > 0.004)
+    ? (deltaPatrimonio / Math.abs(patrimonioAnterior)) * 100 : null;
 
   root.innerHTML = `
     ${state.loading ? `<div class="muted" style="margin-bottom:8px;">Atualizando…</div>` : ""}
@@ -1536,18 +1578,24 @@ function renderInvestimentos(root, actions) {
     </div>
 
     <div class="card">
-      <h2>Evolução do patrimônio — ${escapeHTML(investPeriodLabel())}</h2>
+      <h2>Evolução do patrimônio</h2>
       <div class="stat-row">
-        <div class="stat-tile"><div class="label">Aportes</div><div class="value positive" style="font-size:1.05rem;">${formatBRL(totAportes)}</div></div>
-        <div class="stat-tile"><div class="label">Retiradas</div><div class="value negative" style="font-size:1.05rem;">${formatBRL(totRetiradas)}</div></div>
-        <div class="stat-tile"><div class="label">Rendimentos</div><div class="value" style="font-size:1.05rem; color:${cssVar('--series-1')};">${formatBRL(totRendimentos)}</div></div>
+        <div class="stat-tile"><div class="label">Aportes — ${escapeHTML(investPeriodLabel())}</div><div class="value positive" style="font-size:1.05rem;">${formatBRL(totAportes)}</div></div>
+        <div class="stat-tile"><div class="label">Retiradas — ${escapeHTML(investPeriodLabel())}</div><div class="value negative" style="font-size:1.05rem;">${formatBRL(totRetiradas)}</div></div>
+        <div class="stat-tile"><div class="label">Rendimentos — ${escapeHTML(investPeriodLabel())}</div><div class="value" style="font-size:1.05rem; color:${cssVar('--series-1')};">${formatBRL(totRendimentos)}</div></div>
       </div>
-      ${temMovNoPeriodo ? `
-      <p class="muted" style="margin:2px 0 6px;">Variação líquida por mês (aportes + rendimentos − retiradas)</p>
-      <div class="chart-wrap"><canvas id="chart-inv-evolucao"></canvas></div>
-      <p class="muted" style="margin:14px 0 6px;">Aportes x rendimentos por mês</p>
-      <div class="chart-wrap"><canvas id="chart-inv-aportes-rend"></canvas></div>
-      ` : `<div class="empty-state"><div class="big">📈</div>Sem movimentações neste período.</div>`}
+      ${contas.length > 0 ? `
+      <p class="muted" style="margin:14px 0 2px;">Patrimônio total · ${escapeHTML(periods[0].shortLabel)} – ${escapeHTML(periods[curIdx].shortLabel)}</p>
+      <p style="margin:0 0 8px; font-size:0.92rem;">
+        ${deltaPatrimonio === null
+          ? `<span class="muted">Ainda não há um ${escapeHTML(investGranularidadeLabel())} anterior completo para comparar.</span>`
+          : `<span style="font-weight:700; color:${deltaPatrimonio >= 0 ? cssVar('--good') : cssVar('--critical')};">${deltaPatrimonio >= 0 ? "▲" : "▼"} ${formatBRL(Math.abs(deltaPatrimonio))}${deltaPatrimonioPct !== null ? ` (${deltaPatrimonioPct >= 0 ? "+" : "−"}${Math.abs(deltaPatrimonioPct).toFixed(1).replace(".", ",")}%)` : ""}</span> em relação a ${escapeHTML(periods[prevIdx].label)}`}
+      </p>
+      <div class="chart-wrap"><canvas id="chart-inv-patrimonio"></canvas></div>
+      <p class="muted" style="margin:16px 0 6px;">Aportes, rendimentos e retiradas por ${escapeHTML(investGranularidadeLabel())}</p>
+      <div class="chart-wrap"><canvas id="chart-inv-aportes-rend-ret"></canvas></div>
+      <p class="muted" style="margin-top:12px; font-size:0.76rem;">Patrimônio estimado a partir do saldo atual das contas e do histórico de movimentações; edições diretas de saldo (✎) não entram nessa reconstrução.</p>
+      ` : `<div class="empty-state"><div class="big">📈</div>Cadastre uma conta para ver a evolução do patrimônio.</div>`}
     </div>
   `;
 
@@ -1589,9 +1637,9 @@ function renderInvestimentos(root, actions) {
   document.getElementById("inv-prev").onclick = () => { shiftInvestPeriod(-1); renderCurrentTab(); };
   document.getElementById("inv-next").onclick = () => { shiftInvestPeriod(1); renderCurrentTab(); };
 
-  if (temMovNoPeriodo) {
-    drawEvolucaoPatrimonioChart(invKeys);
-    drawAportesRendimentosChart(invKeys);
+  if (contas.length > 0) {
+    drawPatrimonioTotalChart(periods, patrimonioSeries);
+    drawAportesRendRetChart(periods, porPeriodo);
   }
 }
 
@@ -1713,6 +1761,44 @@ function movimentacoesPorTipoEMes(keys) {
     else if (m.tipo === "rendimento") byMonth[k].rendimento += Number(m.valor) || 0;
   });
   return byMonth;
+}
+// mesma soma, mas agrupada por PERÍODO (que pode abranger vários meses, no caso de
+// trimestre/ano) em vez de por mês isolado — usada nos gráficos de comparação da
+// aba Investimentos, que agora mostram uma janela de vários períodos seguidos.
+function movimentacoesPorTipoEPeriodo(periods) {
+  return periods.map((p) => {
+    const keys = new Set(p.monthKeys);
+    let aporte = 0, retirada = 0, rendimento = 0;
+    state.movimentacoes.forEach((m) => {
+      if (!keys.has(monthKey(m.data))) return;
+      if (m.tipo === "aporte") aporte += Number(m.valor) || 0;
+      else if (m.tipo === "retirada") retirada += Number(m.valor) || 0;
+      else if (m.tipo === "rendimento") rendimento += Number(m.valor) || 0;
+    });
+    return { aporte, retirada, rendimento };
+  });
+}
+// efeito líquido de uma movimentação sobre o PATRIMÔNIO TOTAL (soma de todas as
+// contas): aporte/rendimento aumentam, retirada diminui, transferência entre
+// contas próprias não muda o total (só remaneja entre contas).
+function efeitoMovimentoNoTotal(m) {
+  if (m.tipo === "aporte" || m.tipo === "rendimento") return Number(m.valor) || 0;
+  if (m.tipo === "retirada") return -(Number(m.valor) || 0);
+  return 0;
+}
+// reconstrói o patrimônio total estimado ao FINAL de cada período da janela,
+// partindo do total ATUAL (saldo somado de todas as contas, agora) e "desfazendo"
+// o efeito de toda movimentação posterior ao fim de cada período. Não usa um
+// histórico de saldo por conta (que não existe) — por isso uma edição manual de
+// saldo (✎), que não passa pela régua de movimentações, não entra nessa
+// reconstrução; é a melhor aproximação possível sem manter um livro-razão completo.
+function investPatrimonioPorPeriodo(periods, totalAtual) {
+  return periods.map((p) => {
+    const efeitoPosterior = state.movimentacoes.reduce((acc, m) => (
+      monthKey(m.data) > p.end ? acc + efeitoMovimentoNoTotal(m) : acc
+    ), 0);
+    return totalAtual - efeitoPosterior;
+  });
 }
 
 function renderMovList(list, withActions) {
@@ -1890,73 +1976,83 @@ async function saveMovimentacao(prefill) {
   }
 }
 
-function drawEvolucaoPatrimonioChart(keys) {
-  destroyChart("invEvolucao");
-  const porMes = movimentacoesPorTipoEMes(keys);
-  const variacoes = keys.map((k) => porMes[k].aporte + porMes[k].rendimento - porMes[k].retirada);
-  const ctx = document.getElementById("chart-inv-evolucao");
+// gráfico 1: patrimônio total estimado ao final de cada período da janela — mostra
+// a tendência (subindo/descendo) e permite comparar visualmente o período
+// selecionado (última barra) com os anteriores. Barra fica verde se o patrimônio
+// subiu em relação à barra anterior, laranja se caiu, neutra na primeira (sem
+// período anterior na janela pra comparar).
+function drawPatrimonioTotalChart(periods, series) {
+  destroyChart("invPatrimonio");
+  const ctx = document.getElementById("chart-inv-patrimonio");
   if (!ctx) return;
-  const colors = variacoes.map((v) => v >= 0 ? cssVar("--good") : cssVar("--critical"));
+  const colors = series.map((v, i) => {
+    if (i === 0) return cssVar("--muted");
+    return v >= series[i - 1] ? cssVar("--good") : cssVar("--critical");
+  });
 
-  state.charts.invEvolucao = new Chart(ctx, {
+  const abrirPeriodo = (idx) => {
+    const p = periods[idx];
+    const keySet = new Set(p.monthKeys);
+    showMovimentacoesGenerico((m) => keySet.has(monthKey(m.data)), "Movimentações — " + p.label);
+  };
+
+  state.charts.invPatrimonio = new Chart(ctx, {
     type: "bar",
     data: {
-      labels: keys.map((k) => monthLabel(k).slice(0, 3)),
-      datasets: [{ data: variacoes, backgroundColor: colors, borderRadius: 4, maxBarThickness: 30 }],
+      labels: periods.map((p) => p.shortLabel),
+      datasets: [{ data: series, backgroundColor: colors, borderRadius: 4, maxBarThickness: 30 }],
     },
     options: Object.assign({}, chartBaseOptions({ legend: false }), {
       plugins: { legend: { display: false }, tooltip: tooltipStyle((c) => formatBRL(c.raw)) },
       onClick: (evt, _els, chart) => {
         const points = chart.getElementsAtEventForMode(evt, "nearest", { intersect: true }, true);
-        if (!points.length) return;
-        const mk = keys[points[0].index];
-        showMovimentacoesGenerico((m) => monthKey(m.data) === mk, "Movimentações — " + monthLabel(mk));
+        if (points.length) abrirPeriodo(points[0].index);
       },
       onHover: pointerCursorOnHover,
     }),
   });
-  state.charts.invEvolucao.canvas.addEventListener("dblclick", (evt) => {
-    const points = state.charts.invEvolucao.getElementsAtEventForMode(evt, "nearest", { intersect: true }, true);
-    if (!points.length) return;
-    const mk = keys[points[0].index];
-    showMovimentacoesGenerico((m) => monthKey(m.data) === mk, "Movimentações — " + monthLabel(mk));
+  state.charts.invPatrimonio.canvas.addEventListener("dblclick", (evt) => {
+    const points = state.charts.invPatrimonio.getElementsAtEventForMode(evt, "nearest", { intersect: true }, true);
+    if (points.length) abrirPeriodo(points[0].index);
   });
 }
 
-function drawAportesRendimentosChart(keys) {
-  destroyChart("invAportesRend");
-  const porMes = movimentacoesPorTipoEMes(keys);
-  const ctx = document.getElementById("chart-inv-aportes-rend");
+// gráfico 2: aportes, rendimentos e retiradas lado a lado em cada período da
+// janela, pra comparar a composição de um período com a dos anteriores.
+function drawAportesRendRetChart(periods, porPeriodo) {
+  destroyChart("invAportesRendRet");
+  const ctx = document.getElementById("chart-inv-aportes-rend-ret");
   if (!ctx) return;
+  const TIPOS = ["aporte", "rendimento", "retirada"];
+  const CORES = [cssVar("--good"), cssVar("--series-1"), cssVar("--critical")];
+  const LABELS = { aporte: "Aportes", rendimento: "Rendimentos", retirada: "Retiradas" };
 
-  state.charts.invAportesRend = new Chart(ctx, {
+  const abrirTipoPeriodo = (datasetIndex, index) => {
+    const p = periods[index];
+    const tipo = TIPOS[datasetIndex];
+    const keySet = new Set(p.monthKeys);
+    showMovimentacoesGenerico((m) => keySet.has(monthKey(m.data)) && m.tipo === tipo, LABELS[tipo] + " — " + p.label);
+  };
+
+  state.charts.invAportesRendRet = new Chart(ctx, {
     type: "bar",
     data: {
-      labels: keys.map((k) => monthLabel(k).slice(0, 3)),
-      datasets: [
-        { label: "Aportes", data: keys.map((k) => porMes[k].aporte), backgroundColor: cssVar("--good"), borderRadius: 4, maxBarThickness: 18 },
-        { label: "Rendimentos", data: keys.map((k) => porMes[k].rendimento), backgroundColor: cssVar("--series-1"), borderRadius: 4, maxBarThickness: 18 },
-      ],
+      labels: periods.map((p) => p.shortLabel),
+      datasets: TIPOS.map((tipo, i) => ({
+        label: LABELS[tipo], data: porPeriodo.map((x) => x[tipo]), backgroundColor: CORES[i], borderRadius: 4, maxBarThickness: 14,
+      })),
     },
     options: Object.assign({}, chartBaseOptions({ legend: true }), {
       onClick: (evt, _els, chart) => {
         const points = chart.getElementsAtEventForMode(evt, "nearest", { intersect: true }, true);
-        if (!points.length) return;
-        const { datasetIndex, index } = points[0];
-        const mk = keys[index];
-        const tipo = datasetIndex === 0 ? "aporte" : "rendimento";
-        showMovimentacoesGenerico((m) => monthKey(m.data) === mk && m.tipo === tipo, (tipo === "aporte" ? "Aportes" : "Rendimentos") + " — " + monthLabel(mk));
+        if (points.length) abrirTipoPeriodo(points[0].datasetIndex, points[0].index);
       },
       onHover: pointerCursorOnHover,
     }),
   });
-  state.charts.invAportesRend.canvas.addEventListener("dblclick", (evt) => {
-    const points = state.charts.invAportesRend.getElementsAtEventForMode(evt, "nearest", { intersect: true }, true);
-    if (!points.length) return;
-    const { datasetIndex, index } = points[0];
-    const mk = keys[index];
-    const tipo = datasetIndex === 0 ? "aporte" : "rendimento";
-    showMovimentacoesGenerico((m) => monthKey(m.data) === mk && m.tipo === tipo, (tipo === "aporte" ? "Aportes" : "Rendimentos") + " — " + monthLabel(mk));
+  state.charts.invAportesRendRet.canvas.addEventListener("dblclick", (evt) => {
+    const points = state.charts.invAportesRendRet.getElementsAtEventForMode(evt, "nearest", { intersect: true }, true);
+    if (points.length) abrirTipoPeriodo(points[0].datasetIndex, points[0].index);
   });
 }
 
