@@ -2279,7 +2279,7 @@ function manualFormHTML(prefill) {
     <input type="date" id="f-data" value="${p.data || todayISO()}" />
 
     <label class="field-label">Macrocategoria</label>
-    <select id="f-macro">
+    <select id="f-lanc-macro">
       ${macros.map((m) => `<option value="${escapeHTML(m)}" ${m===p.macrocategoria?"selected":""}>${escapeHTML(m)}</option>`).join("")}
       <option value="__new__">+ Nova macrocategoria…</option>
     </select>
@@ -2316,7 +2316,7 @@ function manualFormHTML(prefill) {
   `;
 }
 function wireManualForm(prefill) {
-  const macroSel = document.getElementById("f-macro");
+  const macroSel = document.getElementById("f-lanc-macro");
   const microSel = document.getElementById("f-micro");
   function fillMicro(selectedMicro) {
     const macro = macroSel.value;
@@ -2396,7 +2396,7 @@ async function saveManualEntry(prefill) {
     const tipo = document.querySelector("#tipo-toggle button.active").dataset.tipo;
     const valor = parseValorInput(document.getElementById("f-valor").value);
     const data = document.getElementById("f-data").value || todayISO();
-    const macrocategoria = document.getElementById("f-macro").value;
+    const macrocategoria = document.getElementById("f-lanc-macro").value;
     const microcategoria = document.getElementById("f-micro").value;
     const descricao = document.getElementById("f-desc").value.trim();
     const conta = document.getElementById("f-conta").value.trim();
