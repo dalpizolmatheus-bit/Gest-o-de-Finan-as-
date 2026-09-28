@@ -25,7 +25,7 @@ const HEADERS = {
   [SHEETS.LANCAMENTOS]: [
     "id", "data", "tipo", "valor", "macrocategoria", "microcategoria",
     "descricao", "conta", "forma_entrada", "parcelamento_id",
-    "comprovante_url", "criado_em", "meio_pagamento",
+    "comprovante_url", "criado_em", "meio_pagamento", "tipo_custo",
   ],
   [SHEETS.CATEGORIAS]: ["macrocategoria", "microcategoria", "ativa"],
   [SHEETS.PARCELAMENTOS]: [

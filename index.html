@@ -34,6 +34,8 @@
     --series-8: #915200; /* Outros */
     --good: #047857; /* entradas / marca — verde */
     --critical: #eb6834; /* saídas, dívidas — laranja vívido */
+    --custo-fixo: #2a5a8c; /* despesas fixas — azul */
+    --custo-variavel: #eb9234; /* despesas variáveis — âmbar */
     --radius-lg: 18px;
     --radius-md: 12px;
     --radius-sm: 9px;
@@ -59,6 +61,8 @@
       --series-8: #a16100;
       --good: #059669;
       --critical: #d95926;
+      --custo-fixo: #4f8fc7;
+      --custo-variavel: #f0a94e;
     }
   }
   :root[data-theme="dark"] {
@@ -81,6 +85,8 @@
     --series-8: #a16100;
     --good: #059669;
     --critical: #d95926;
+    --custo-fixo: #4f8fc7;
+    --custo-variavel: #f0a94e;
   }
 
   * { box-sizing: border-box; }
@@ -315,6 +321,13 @@ function meioPagamentoColor(meio) {
   if (meio === "Desconto em Folha") return cssVar("--series-7");
   return cssVar("--muted"); // não informado
 }
+// custo fixo x variável — só se aplica a despesas; lançamentos antigos sem o campo
+// preenchido contam como "Variável" (é o padrão de todo lançamento novo também).
+const TIPO_CUSTO_OPTS = ["Variável", "Fixo"];
+function tipoCustoColor(tc) {
+  return tc === "Fixo" ? cssVar("--custo-fixo") : cssVar("--custo-variavel");
+}
+function isFixo(l) { return l.tipo_custo === "Fixo"; }
 // Escolhe texto branco ou escuro por cima de uma cor de preenchimento, pela luminância (WCAG).
 function textColorForFill_(hex) {
   const h = (hex || "").replace("#", "");
@@ -954,41 +967,52 @@ function baseChartFont() {
 function drawReceitasDespesasChart(keys) {
   destroyChart("rd");
   const receitas = keys.map((k) => sum(state.lancamentos.filter((l) => monthKey(l.data) === k && l.tipo === "receita")));
-  const despesas = keys.map((k) => sum(state.lancamentos.filter((l) => monthKey(l.data) === k && l.tipo === "despesa")));
+  const despesasFixas = keys.map((k) => sum(state.lancamentos.filter((l) => monthKey(l.data) === k && l.tipo === "despesa" && isFixo(l))));
+  const despesasVariaveis = keys.map((k) => sum(state.lancamentos.filter((l) => monthKey(l.data) === k && l.tipo === "despesa" && !isFixo(l))));
+  const despesasTotais = keys.map((_, i) => despesasFixas[i] + despesasVariaveis[i]);
   const ctx = document.getElementById("chart-rd");
   if (!ctx) return;
 
-  // desenha o % que a despesa representa sobre a receita do mesmo mês, acima da barra de despesas
+  // desenha o % que a despesa representa sobre a receita do mesmo mês, acima da
+  // barra empilhada de despesas (no topo do segmento "variável", ou do "fixo"
+  // quando não houver despesa variável naquele mês).
   const pctSobreReceitaPlugin = {
     id: "pctSobreReceita",
     afterDatasetsDraw(chart) {
-      const meta = chart.getDatasetMeta(1); // dataset "Despesas"
-      if (!meta || meta.hidden) return;
+      const metaFixo = chart.getDatasetMeta(1);
+      const metaVar = chart.getDatasetMeta(2);
+      if (!metaVar || metaVar.hidden) return;
       const c = chart.ctx;
       c.save();
       c.font = "600 10px system-ui, -apple-system, sans-serif";
       c.fillStyle = cssVar("--critical");
       c.textAlign = "center";
-      meta.data.forEach((bar, i) => {
-        const rec = receitas[i], desp = despesas[i];
+      metaVar.data.forEach((bar, i) => {
+        const rec = receitas[i], desp = despesasTotais[i];
         if (!desp || rec <= 0) return;
+        const topBar = despesasVariaveis[i] > 0 ? bar : (metaFixo.data[i] || bar);
         const pct = Math.round((desp / rec) * 100);
-        c.fillText(pct + "%", bar.x, bar.y - 6);
+        c.fillText(pct + "%", topBar.x, topBar.y - 6);
       });
       c.restore();
     },
   };
+
+  const opts = chartBaseOptions({ legend: true });
+  opts.scales.x.stacked = true;
+  opts.scales.y.stacked = true;
 
   state.charts.rd = new Chart(ctx, {
     type: "bar",
     data: {
       labels: keys.map((k) => monthLabel(k).slice(0,3)),
       datasets: [
-        { label: "Receitas", data: receitas, backgroundColor: cssVar("--good"), borderRadius: 4, maxBarThickness: 22 },
-        { label: "Despesas", data: despesas, backgroundColor: cssVar("--critical"), borderRadius: 4, maxBarThickness: 22 },
+        { label: "Receitas", data: receitas, backgroundColor: cssVar("--good"), borderRadius: 4, maxBarThickness: 22, stack: "receitas" },
+        { label: "Despesas fixas", data: despesasFixas, backgroundColor: cssVar("--custo-fixo"), borderRadius: { bottomLeft: 4, bottomRight: 4 }, maxBarThickness: 22, stack: "despesas" },
+        { label: "Despesas variáveis", data: despesasVariaveis, backgroundColor: cssVar("--custo-variavel"), borderRadius: { topLeft: 4, topRight: 4 }, maxBarThickness: 22, stack: "despesas" },
       ],
     },
-    options: Object.assign({}, chartBaseOptions({ legend: true }), {
+    options: Object.assign({}, opts, {
       layout: { padding: { top: 16 } },
       onClick: (evt, _els, chart) => {
         const points = chart.getElementsAtEventForMode(evt, "nearest", { intersect: true }, true);
@@ -1166,8 +1190,9 @@ function drawCategoriaChart(despesasList, periodLabel, periodMatchFn, opts) {
   });
 }
 
-/* Gráfico de barras com o valor em R$ (não %) por chave (ex.: forma de pagamento).
-   keyFn extrai a chave de cada lançamento; colorFn escolhe a cor de cada barra. */
+/* Gráfico de barras com o valor em R$ (não %) por chave (ex.: forma de pagamento),
+   empilhado por tipo de custo — fixo embaixo, variável em cima. keyFn extrai a
+   chave de cada lançamento (ex.: meio de pagamento). */
 function drawValorPorChaveBarChart(despesasList, periodLabel, periodMatchFn, opts) {
   opts = opts || {};
   const canvasId = opts.canvasId;
@@ -1334,14 +1359,20 @@ function drawCategoriaComparativoChart(tipo, curKeys, prevKeys, curLabel, prevLa
 function drawParcelasChart(mk) {
   destroyChart("parc");
   const keys = next6MonthKeys(mk);
-  const vals = keys.map((k) => sum(state.lancamentos.filter((l) => monthKey(l.data) === k && l.forma_entrada === "parcelado" && l.tipo === "despesa")));
+  const valsFixo = keys.map((k) => sum(state.lancamentos.filter((l) => monthKey(l.data) === k && l.forma_entrada === "parcelado" && l.tipo === "despesa" && isFixo(l))));
+  const valsVar = keys.map((k) => sum(state.lancamentos.filter((l) => monthKey(l.data) === k && l.forma_entrada === "parcelado" && l.tipo === "despesa" && !isFixo(l))));
   const ctx = document.getElementById("chart-parc");
   if (!ctx) return;
-  const opts = chartBaseOptions({ legend: false });
+  const opts = chartBaseOptions({ legend: true });
   opts.onHover = pointerCursorOnHover;
+  opts.scales.x.stacked = true;
+  opts.scales.y.stacked = true;
   state.charts.parc = new Chart(ctx, {
     type: "bar",
-    data: { labels: keys.map((k) => monthLabel(k).slice(0,3)), datasets: [{ label: "Parcelas", data: vals, backgroundColor: cssVar("--critical"), borderRadius: 4, maxBarThickness: 26 }] },
+    data: { labels: keys.map((k) => monthLabel(k).slice(0,3)), datasets: [
+      { label: "Fixo", data: valsFixo, backgroundColor: cssVar("--custo-fixo"), borderRadius: { bottomLeft: 4, bottomRight: 4 }, maxBarThickness: 26 },
+      { label: "Variável", data: valsVar, backgroundColor: cssVar("--custo-variavel"), borderRadius: { topLeft: 4, topRight: 4 }, maxBarThickness: 26 },
+    ] },
     options: opts,
   });
   state.charts.parc.canvas.addEventListener("dblclick", (evt) => {
@@ -2302,6 +2333,13 @@ function manualFormHTML(prefill) {
       <p class="muted hidden" id="meio-pagamento-hint" style="margin-top:4px; font-size:0.78rem;">Selecione como foi pago para lançar.</p>
     </div>
 
+    <div id="tipo-custo-field" class="${tipo==="despesa"?"":"hidden"}">
+      <label class="field-label">Tipo de custo</label>
+      <select id="f-tipo-custo">
+        ${TIPO_CUSTO_OPTS.map((t) => `<option value="${escapeHTML(t)}" ${(p.tipo_custo || "Variável")===t?"selected":""}>${escapeHTML(t)}</option>`).join("")}
+      </select>
+    </div>
+
     ${state.editingId ? "" : `
     <label style="display:flex; align-items:center; gap:8px; margin-top:14px; font-size:0.9rem;">
       <input type="checkbox" id="f-parcelado" ${isParcelaPrefill?"checked":""} /> <span id="f-parcelado-label">${parcelaCopy(tipo).label}</span>
@@ -2355,6 +2393,8 @@ function wireManualForm(prefill) {
       if (helperEl) helperEl.textContent = copy.helper;
       const meioPagField = document.getElementById("meio-pagamento-field");
       if (meioPagField) meioPagField.classList.toggle("hidden", b.dataset.tipo !== "despesa");
+      const tipoCustoField = document.getElementById("tipo-custo-field");
+      if (tipoCustoField) tipoCustoField.classList.toggle("hidden", b.dataset.tipo !== "despesa");
       updateSaveButtonState();
     });
   });
@@ -2401,11 +2441,12 @@ async function saveManualEntry(prefill) {
     const descricao = document.getElementById("f-desc").value.trim();
     const conta = document.getElementById("f-conta").value.trim();
     const meioPagamento = tipo === "despesa" ? (document.getElementById("f-meio-pagamento")?.value || "") : "";
+    const tipoCusto = tipo === "despesa" ? (document.getElementById("f-tipo-custo")?.value || "Variável") : "";
     if (!valor || valor <= 0) { toast("Informe um valor válido."); btn.disabled = false; return; }
     if (tipo === "despesa" && !meioPagamento) { toast("Selecione como foi pago antes de lançar."); btn.disabled = false; return; }
 
     if (state.editingId) {
-      const updated = await apiUpdate("Lancamentos", state.editingId, { tipo, valor, data, macrocategoria, microcategoria, descricao, conta, meio_pagamento: meioPagamento });
+      const updated = await apiUpdate("Lancamentos", state.editingId, { tipo, valor, data, macrocategoria, microcategoria, descricao, conta, meio_pagamento: meioPagamento, tipo_custo: tipoCusto });
       const idx = state.lancamentos.findIndex((l) => l.id === state.editingId);
       if (idx !== -1) state.lancamentos[idx] = updated;
       toast("Lançamento atualizado.");
@@ -2430,7 +2471,7 @@ async function saveManualEntry(prefill) {
         items.push({
           tipo, valor: parcelaValor, data: addMonthsISO(data, i),
           macrocategoria, microcategoria, descricao: `${descricao || macrocategoria} (parcela ${i+1}/${numParcelas})`,
-          conta, meio_pagamento: meioPagamento, forma_entrada: "parcelado", parcelamento_id: parcelamento.id, comprovante_url: prefill?.comprovante_url || "",
+          conta, meio_pagamento: meioPagamento, tipo_custo: tipoCusto, forma_entrada: "parcelado", parcelamento_id: parcelamento.id, comprovante_url: prefill?.comprovante_url || "",
         });
       }
       const created = await apiBulkCreate("Lancamentos", items);
@@ -2439,7 +2480,7 @@ async function saveManualEntry(prefill) {
       toast(tipo === "receita" ? `Receita parcelada lançada em ${numParcelas}x.` : `Parcelamento lançado em ${numParcelas}x.`);
     } else {
       const created = await apiCreate("Lancamentos", {
-        tipo, valor, data, macrocategoria, microcategoria, descricao, conta, meio_pagamento: meioPagamento,
+        tipo, valor, data, macrocategoria, microcategoria, descricao, conta, meio_pagamento: meioPagamento, tipo_custo: tipoCusto,
         forma_entrada: prefill?.forma_entrada || "manual", comprovante_url: prefill?.comprovante_url || "",
       });
       state.lancamentos = state.lancamentos.concat([created]);
