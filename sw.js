@@ -1,7 +1,7 @@
 // Service worker do Gestor Financeiro Pessoal.
 // Cacheia o "shell" do app para abrir rápido e funcionar offline (os dados
 // em si vêm do Google Sheets, então lançamentos novos exigem rede).
-const CACHE_NAME = "gestor-financeiro-v3";
+const CACHE_NAME = "gestor-financeiro-v4";
 const SHELL_FILES = [
   "./",
   "./index.html",
