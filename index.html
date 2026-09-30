@@ -155,6 +155,9 @@
   .chart-wrap.wide { height: 230px; }
   .chart-scroll { overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; }
 
+  .rd-chart-row { display: flex; align-items: stretch; }
+  .chart-wrap.rd-axis { width: 58px; overflow: hidden; flex: none; background: var(--surface-1); }
+
   .empty-state { text-align: center; padding: 28px 12px; color: var(--text-secondary); }
   .empty-state .big { font-size: 2rem; margin-bottom: 8px; }
 
@@ -328,6 +331,17 @@ function tipoCustoColor(tc) {
   return tc === "Fixo" ? cssVar("--custo-fixo") : cssVar("--custo-variavel");
 }
 function isFixo(l) { return l.tipo_custo === "Fixo"; }
+// texto/cor da variação % de uma despesa em relação ao mês anterior — subir é
+// "ruim" (laranja/crítico), cair é "bom" (verde); usado nos gráficos de
+// evolução mensal de despesas.
+function pctVariacaoInfo(cur, prev) {
+  if (prev === 0 && cur === 0) return null;
+  if (prev === 0 && cur > 0) return { text: "novo", color: cssVar("--critical") };
+  if (prev > 0 && cur === 0) return { text: "▼100%", color: cssVar("--good") };
+  const pct = Math.round(((cur - prev) / prev) * 100);
+  if (pct === 0) return { text: "=", color: cssVar("--muted") };
+  return { text: (pct > 0 ? "▲" : "▼") + Math.abs(pct) + "%", color: pct > 0 ? cssVar("--critical") : cssVar("--good") };
+}
 // Escolhe texto branco ou escuro por cima de uma cor de preenchimento, pela luminância (WCAG).
 function textColorForFill_(hex) {
   const h = (hex || "").replace("#", "");
@@ -370,6 +384,8 @@ const state = {
   investQuarter: currentQuarter(),
   investMonth: currentMonthKey(),
   filter: { mode: "mes", month: currentMonthKey(), year: currentYear(), macro: "" },
+  histDespesasMacro: "",
+  histDespesasMicro: "",
   charts: {},
   sheetMode: "manual",
   editingId: null,
@@ -529,14 +545,14 @@ function shiftMonthKey(key, n) {
   const d = new Date(y, m-1+n, 1);
   return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0");
 }
-function last6MonthKeys(baseKey) {
-  const keys = [];
-  for (let i = 5; i >= 0; i--) keys.push(shiftMonthKey(baseKey, -i));
-  return keys;
-}
 function next6MonthKeys(baseKey) {
   const keys = [];
   for (let i = 0; i < 6; i++) keys.push(shiftMonthKey(baseKey, i));
+  return keys;
+}
+function monthWindowKeys(baseKey, before, after) {
+  const keys = [];
+  for (let i = -before; i <= after; i++) keys.push(shiftMonthKey(baseKey, i));
   return keys;
 }
 function formatBRL(v) {
@@ -747,8 +763,12 @@ function renderPainelMes(root) {
     </div>` : ""}
 
     <div class="card">
-      <h2>Receitas x despesas — últimos 6 meses</h2>
-      <div class="chart-wrap"><canvas id="chart-rd"></canvas></div>
+      <h2>Receitas x despesas — 5 meses antes e 5 meses depois</h2>
+      <p class="muted" style="margin:-2px 0 10px;">Arraste para o lado para ver todos os meses.</p>
+      <div class="rd-chart-row">
+        <div class="chart-wrap wide rd-axis" id="chart-rd-axis-wrap"><div class="chart-wrap wide" id="chart-rd-axis-inner"><canvas id="chart-rd-axis"></canvas></div></div>
+        <div class="chart-scroll" style="flex:1;"><div class="chart-wrap wide" id="chart-rd-wrap"><canvas id="chart-rd"></canvas></div></div>
+      </div>
     </div>
 
     <div class="card">
@@ -788,6 +808,25 @@ function renderPainelMes(root) {
     </div>
 
     <div class="card">
+      <h2>Despesas por categoria — evolução mensal</h2>
+      <div class="filters-row" style="margin-bottom:10px;">
+        <select id="hist-desp-macro" style="flex:1;">
+          <option value="">Todas categorias</option>
+          ${distinctMacros().map((m) => `<option value="${escapeHTML(m)}" ${state.histDespesasMacro===m?"selected":""}>${escapeHTML(m)}</option>`).join("")}
+        </select>
+        <select id="hist-desp-micro" style="flex:1;" ${state.histDespesasMacro ? "" : "disabled"}>
+          <option value="">Todas</option>
+          ${state.histDespesasMacro ? microOptionsForMacro(state.histDespesasMacro).map((m) => `<option value="${escapeHTML(m)}" ${state.histDespesasMicro===m?"selected":""}>${escapeHTML(m)}</option>`).join("") : ""}
+        </select>
+      </div>
+      <p class="muted" style="margin:-2px 0 10px;">Arraste para o lado para ver todos os meses.</p>
+      <div class="rd-chart-row">
+        <div class="chart-wrap wide rd-axis" id="chart-histdesp-axis-wrap"><div class="chart-wrap wide" id="chart-histdesp-axis-inner"><canvas id="chart-histdesp-axis"></canvas></div></div>
+        <div class="chart-scroll" style="flex:1;"><div class="chart-wrap wide" id="chart-histdesp-wrap"><canvas id="chart-histdesp"></canvas></div></div>
+      </div>
+    </div>
+
+    <div class="card">
       <h2>Lançamentos recentes — ${mkLabel}</h2>
       <div id="recent-list">${doMes.length ? renderList(doMes.slice().sort(byDataDesc).slice(0, 8)) : `<div class="empty-state"><div class="big">📭</div>Nenhum lançamento neste mês ainda.</div>`}</div>
     </div>
@@ -801,7 +840,16 @@ function renderPainelMes(root) {
   `;
   wireListActions(root);
   document.getElementById("card-divida-futura")?.addEventListener("click", () => showParcelasAbertas());
-  drawReceitasDespesasChart(last6MonthKeys(mk));
+  document.getElementById("hist-desp-macro")?.addEventListener("change", (e) => {
+    state.histDespesasMacro = e.target.value;
+    state.histDespesasMicro = "";
+    renderPainelMes(root);
+  });
+  document.getElementById("hist-desp-micro")?.addEventListener("change", (e) => {
+    state.histDespesasMicro = e.target.value;
+    renderPainelMes(root);
+  });
+  drawReceitasDespesasChartMes(mk);
   if (despesas > 0) drawCategoriaChart(doMes.filter((l) => l.tipo === "despesa"), monthLabel(mk), (l) => monthKey(l.data) === mk);
   if (despesas > 0 || prevDespesas > 0) drawCategoriaComparativoChart("despesa", mk, prevMk, mkLabel, prevMkLabel, "chart-catcomp", "catcomp");
   if (receitas > 0 || prevReceitas > 0) drawCategoriaComparativoChart("receita", mk, prevMk, mkLabel, prevMkLabel, "chart-catcomp-receita", "catcompReceita");
@@ -811,6 +859,7 @@ function renderPainelMes(root) {
     });
   }
   drawParcelasChart(mk);
+  drawHistoricoDespesasChart(mk);
 }
 
 /* mostra, numa folha, todas as parcelas futuras em aberto — com edição e exclusão,
@@ -1023,6 +1072,106 @@ function drawReceitasDespesasChart(keys) {
       onHover: (evt, els, chart) => { chart.canvas.style.cursor = els.length ? "pointer" : "default"; },
     }),
     plugins: [pctSobreReceitaPlugin],
+  });
+}
+
+/* versão do gráfico "Receitas x despesas" usada no Painel Mês: janela fixa de
+   5 meses antes + mês atual + 5 meses depois (11 barras), sem separar
+   fixo/variável (despesa como um todo), com rolagem horizontal e o mês
+   vigente centralizado na tela ao carregar. */
+function drawReceitasDespesasChartMes(mk) {
+  destroyChart("rd");
+  destroyChart("rdAxis");
+  const keys = monthWindowKeys(mk, 5, 5);
+  const curIdx = keys.indexOf(mk);
+  const receitas = keys.map((k) => sum(state.lancamentos.filter((l) => monthKey(l.data) === k && l.tipo === "receita")));
+  const despesas = keys.map((k) => sum(state.lancamentos.filter((l) => monthKey(l.data) === k && l.tipo === "despesa")));
+  const ctx = document.getElementById("chart-rd");
+  if (!ctx) return;
+
+  const widthPx = Math.max(keys.length * 70, 340);
+  const wrapEl = document.getElementById("chart-rd-wrap");
+  if (wrapEl) wrapEl.style.width = widthPx + "px";
+  const axisInnerEl = document.getElementById("chart-rd-axis-inner");
+  if (axisInnerEl) axisInnerEl.style.width = widthPx + "px";
+
+  const pctSobreReceitaPlugin = {
+    id: "pctSobreReceitaMes",
+    afterDatasetsDraw(chart) {
+      const metaDesp = chart.getDatasetMeta(1);
+      if (!metaDesp || metaDesp.hidden) return;
+      const c = chart.ctx;
+      c.save();
+      c.font = "600 10px system-ui, -apple-system, sans-serif";
+      c.fillStyle = cssVar("--critical");
+      c.textAlign = "center";
+      metaDesp.data.forEach((bar, i) => {
+        const rec = receitas[i], desp = despesas[i];
+        if (!desp || rec <= 0) return;
+        const pct = Math.round((desp / rec) * 100);
+        c.fillText(pct + "%", bar.x, bar.y - 6);
+      });
+      c.restore();
+    },
+  };
+
+  // a coluna Y (escala de valores) fica fixa fora da área que rola: o gráfico
+  // principal não desenha seus próprios ticks/borda do eixo Y (só a grade,
+  // como referência ao rolar), e um segundo gráfico "espelho", recortado para
+  // mostrar só a largura do eixo, fica parado à esquerda mostrando a escala.
+  const opts = chartBaseOptions({ legend: true });
+  opts.scales.y.ticks.display = false;
+  opts.scales.y.border.display = false;
+
+  const datasets = [
+    { label: "Receitas", data: receitas, backgroundColor: cssVar("--good"), borderRadius: 4, maxBarThickness: 22 },
+    { label: "Despesas", data: despesas, backgroundColor: cssVar("--critical"), borderRadius: 4, maxBarThickness: 22 },
+  ];
+  const labels = keys.map((k) => monthLabel(k).slice(0,3));
+  const sharedLayout = { layout: { padding: { top: 16 } } };
+
+  state.charts.rd = new Chart(ctx, {
+    type: "bar",
+    data: { labels, datasets },
+    options: Object.assign({}, opts, sharedLayout, {
+      onClick: (evt, _els, chart) => {
+        const points = chart.getElementsAtEventForMode(evt, "nearest", { intersect: true }, true);
+        if (!points.length) return;
+        const { datasetIndex, index } = points[0];
+        showLancamentosDoMes(keys[index], datasetIndex === 0 ? "receita" : "despesa");
+      },
+      onHover: (evt, els, chart) => { chart.canvas.style.cursor = els.length ? "pointer" : "default"; },
+    }),
+    plugins: [pctSobreReceitaPlugin],
+  });
+
+  const axisCtx = document.getElementById("chart-rd-axis");
+  if (axisCtx) {
+    const axisOpts = chartBaseOptions({ legend: true });
+    axisOpts.scales.y.grid.display = false;
+    axisOpts.scales.y.border.display = true;
+    state.charts.rdAxis = new Chart(axisCtx, {
+      type: "bar",
+      data: { labels, datasets },
+      options: Object.assign({}, axisOpts, sharedLayout, { events: [] }),
+    });
+  }
+
+  requestAnimationFrame(() => {
+    const axisWrapEl = document.getElementById("chart-rd-axis-wrap");
+    if (axisWrapEl && state.charts.rdAxis) {
+      const axisW = Math.ceil(state.charts.rdAxis.scales.y.width) + 2;
+      axisWrapEl.style.width = axisW + "px";
+    }
+    if (wrapEl) {
+      const chart = state.charts.rd;
+      const meta = chart && chart.getDatasetMeta(0);
+      const bar = meta && meta.data[curIdx];
+      if (!bar) return;
+      const scrollEl = wrapEl.parentElement;
+      if (!scrollEl) return;
+      scrollEl.scrollLeft = Math.max(0, bar.x - scrollEl.clientWidth / 2);
+    }
   });
 }
 
@@ -1361,12 +1510,44 @@ function drawParcelasChart(mk) {
   const keys = next6MonthKeys(mk);
   const valsFixo = keys.map((k) => sum(state.lancamentos.filter((l) => monthKey(l.data) === k && l.forma_entrada === "parcelado" && l.tipo === "despesa" && isFixo(l))));
   const valsVar = keys.map((k) => sum(state.lancamentos.filter((l) => monthKey(l.data) === k && l.forma_entrada === "parcelado" && l.tipo === "despesa" && !isFixo(l))));
+  // mês anterior ao início da janela, só para calcular a variação % da
+  // primeira barra visível (não é exibido no gráfico).
+  const mesAnteriorKey = shiftMonthKey(keys[0], -1);
+  const fixoMesAnterior0 = sum(state.lancamentos.filter((l) => monthKey(l.data) === mesAnteriorKey && l.forma_entrada === "parcelado" && l.tipo === "despesa" && isFixo(l)));
+  const varMesAnterior0 = sum(state.lancamentos.filter((l) => monthKey(l.data) === mesAnteriorKey && l.forma_entrada === "parcelado" && l.tipo === "despesa" && !isFixo(l)));
+  const fixoAnterior = (i) => (i === 0 ? fixoMesAnterior0 : valsFixo[i - 1]);
+  const varAnterior = (i) => (i === 0 ? varMesAnterior0 : valsVar[i - 1]);
   const ctx = document.getElementById("chart-parc");
   if (!ctx) return;
   const opts = chartBaseOptions({ legend: true });
   opts.onHover = pointerCursorOnHover;
   opts.scales.x.stacked = true;
   opts.scales.y.stacked = true;
+  opts.layout = { padding: { top: 30 } };
+
+  // variação % de fixo e de variável, cada uma em relação ao mesmo segmento
+  // no mês anterior, mostradas em duas linhas acima da barra (V em cima, F
+  // embaixo, na mesma ordem visual do empilhamento: variável fica no topo).
+  const pctVariacaoParcPlugin = {
+    id: "pctVariacaoParc",
+    afterDatasetsDraw(chart) {
+      const metaVar = chart.getDatasetMeta(1);
+      if (!metaVar || metaVar.hidden) return;
+      const c = chart.ctx;
+      c.save();
+      c.font = "700 9px system-ui, -apple-system, sans-serif";
+      c.textAlign = "center";
+      metaVar.data.forEach((barVar, i) => {
+        const topY = barVar.y;
+        const varInfo = pctVariacaoInfo(valsVar[i], varAnterior(i));
+        const fixoInfo = pctVariacaoInfo(valsFixo[i], fixoAnterior(i));
+        if (varInfo) { c.fillStyle = varInfo.color; c.fillText("V " + varInfo.text, barVar.x, topY - 16); }
+        if (fixoInfo) { c.fillStyle = fixoInfo.color; c.fillText("F " + fixoInfo.text, barVar.x, topY - 5); }
+      });
+      c.restore();
+    },
+  };
+
   state.charts.parc = new Chart(ctx, {
     type: "bar",
     data: { labels: keys.map((k) => monthLabel(k).slice(0,3)), datasets: [
@@ -1374,6 +1555,7 @@ function drawParcelasChart(mk) {
       { label: "Variável", data: valsVar, backgroundColor: cssVar("--custo-variavel"), borderRadius: { topLeft: 4, topRight: 4 }, maxBarThickness: 26 },
     ] },
     options: opts,
+    plugins: [pctVariacaoParcPlugin],
   });
   state.charts.parc.canvas.addEventListener("dblclick", (evt) => {
     const points = state.charts.parc.getElementsAtEventForMode(evt, "nearest", { intersect: true }, true);
@@ -1381,6 +1563,113 @@ function drawParcelasChart(mk) {
     const mkSel = keys[points[0].index];
     const filterFn = (l) => l.forma_entrada === "parcelado" && l.tipo === "despesa" && monthKey(l.data) === mkSel;
     showLancamentosGenerico(filterFn, `Parcelas — ${monthLabel(mkSel)}`);
+  });
+}
+
+/* "Despesas por categoria — evolução mensal": despesas como um todo (sem
+   separar fixo/variável), com filtro opcional por macro/micro categoria,
+   janela de 5 meses antes + mês atual + 5 meses depois, eixo Y fixo (mesmo
+   esquema de gráfico "espelho" recortado usado em drawReceitasDespesasChartMes)
+   e rolagem horizontal centralizada no mês vigente ao carregar. */
+function drawHistoricoDespesasChart(mk) {
+  destroyChart("histdesp");
+  destroyChart("histdespAxis");
+  const keys = monthWindowKeys(mk, 5, 5);
+  const curIdx = keys.indexOf(mk);
+  const macro = state.histDespesasMacro;
+  const micro = state.histDespesasMicro;
+  const matchesFiltro = (l) => {
+    if (l.tipo !== "despesa") return false;
+    if (macro && l.macrocategoria !== macro) return false;
+    if (micro && l.microcategoria !== micro) return false;
+    return true;
+  };
+  const valores = keys.map((k) => sum(state.lancamentos.filter((l) => monthKey(l.data) === k && matchesFiltro(l))));
+  // um mês a mais, antes do início da janela, só para calcular a variação % da
+  // primeira barra visível em relação ao mês anterior a ela (não é exibido).
+  const valorMesAnterior = (i) => (i === 0 ? sum(state.lancamentos.filter((l) => monthKey(l.data) === shiftMonthKey(keys[0], -1) && matchesFiltro(l))) : valores[i - 1]);
+  const ctx = document.getElementById("chart-histdesp");
+  if (!ctx) return;
+
+  const widthPx = Math.max(keys.length * 70, 340);
+  const wrapEl = document.getElementById("chart-histdesp-wrap");
+  if (wrapEl) wrapEl.style.width = widthPx + "px";
+  const axisInnerEl = document.getElementById("chart-histdesp-axis-inner");
+  if (axisInnerEl) axisInnerEl.style.width = widthPx + "px";
+
+  const opts = chartBaseOptions({ legend: false });
+  opts.scales.y.ticks.display = false;
+  opts.scales.y.border.display = false;
+
+  const labels = keys.map((k) => monthLabel(k).slice(0,3));
+  const datasets = [
+    { label: "Despesas", data: valores, backgroundColor: cssVar("--critical"), borderRadius: 4, maxBarThickness: 26 },
+  ];
+  const sharedLayout = { layout: { padding: { top: 16 } } };
+
+  // % de variação de cada mês em relação ao mês anterior, sempre acima da
+  // barra — despesa subindo é "ruim" (laranja), caindo é "bom" (verde).
+  const pctVariacaoPlugin = {
+    id: "pctVariacaoHistDesp",
+    afterDatasetsDraw(chart) {
+      const meta = chart.getDatasetMeta(0);
+      if (!meta || meta.hidden) return;
+      const c = chart.ctx;
+      c.save();
+      c.font = "700 10px system-ui, -apple-system, sans-serif";
+      c.textAlign = "center";
+      meta.data.forEach((bar, i) => {
+        const info = pctVariacaoInfo(valores[i], valorMesAnterior(i));
+        if (!info) return;
+        c.fillStyle = info.color;
+        c.fillText(info.text, bar.x, bar.y - 6);
+      });
+      c.restore();
+    },
+  };
+
+  state.charts.histdesp = new Chart(ctx, {
+    type: "bar",
+    data: { labels, datasets },
+    options: Object.assign({}, opts, sharedLayout, {
+      onClick: (evt, _els, chart) => {
+        const points = chart.getElementsAtEventForMode(evt, "nearest", { intersect: true }, true);
+        if (!points.length) return;
+        const mkSel = keys[points[0].index];
+        showLancamentosGenerico((l) => monthKey(l.data) === mkSel && matchesFiltro(l), `Despesas — ${monthLabel(mkSel)}`);
+      },
+      onHover: pointerCursorOnHover,
+    }),
+    plugins: [pctVariacaoPlugin],
+  });
+
+  const axisCtx = document.getElementById("chart-histdesp-axis");
+  if (axisCtx) {
+    const axisOpts = chartBaseOptions({ legend: false });
+    axisOpts.scales.y.grid.display = false;
+    axisOpts.scales.y.border.display = true;
+    state.charts.histdespAxis = new Chart(axisCtx, {
+      type: "bar",
+      data: { labels, datasets },
+      options: Object.assign({}, axisOpts, sharedLayout, { events: [] }),
+    });
+  }
+
+  requestAnimationFrame(() => {
+    const axisWrapEl = document.getElementById("chart-histdesp-axis-wrap");
+    if (axisWrapEl && state.charts.histdespAxis) {
+      const axisW = Math.ceil(state.charts.histdespAxis.scales.y.width) + 2;
+      axisWrapEl.style.width = axisW + "px";
+    }
+    if (wrapEl) {
+      const chart = state.charts.histdesp;
+      const meta = chart && chart.getDatasetMeta(0);
+      const bar = meta && meta.data[curIdx];
+      if (!bar) return;
+      const scrollEl = wrapEl.parentElement;
+      if (!scrollEl) return;
+      scrollEl.scrollLeft = Math.max(0, bar.x - scrollEl.clientWidth / 2);
+    }
   });
 }
 function tooltipStyle(labelFn) {
@@ -1470,6 +1759,11 @@ function yearOptions(selected) {
 function distinctMacros() {
   const set = new Set();
   state.categorias.forEach((c) => c.macrocategoria && set.add(c.macrocategoria));
+  return Array.from(set);
+}
+function microOptionsForMacro(macro) {
+  const set = new Set();
+  state.categorias.forEach((c) => { if (c.macrocategoria === macro && c.microcategoria) set.add(c.microcategoria); });
   return Array.from(set);
 }
 function tipoColor(tipo) {
