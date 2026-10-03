@@ -849,15 +849,17 @@ function renderPainelMes(root) {
     state.histDespesasMicro = e.target.value;
     renderPainelMes(root);
   });
+  // chamadas sempre incondicionais: cada drawXChart já se auto-destrói (e sai
+  // sem desenhar nada) quando não há canvas ou não há dados — assim, quando um
+  // lançamento sai/entra e some/aparece o último dado de um gráfico, o Chart.js
+  // antigo é sempre descartado corretamente, nunca fica "pendurado" em memória.
   drawReceitasDespesasChartMes(mk);
-  if (despesas > 0) drawCategoriaChart(doMes.filter((l) => l.tipo === "despesa"), monthLabel(mk), (l) => monthKey(l.data) === mk);
-  if (despesas > 0 || prevDespesas > 0) drawCategoriaComparativoChart("despesa", mk, prevMk, mkLabel, prevMkLabel, "chart-catcomp", "catcomp");
-  if (receitas > 0 || prevReceitas > 0) drawCategoriaComparativoChart("receita", mk, prevMk, mkLabel, prevMkLabel, "chart-catcomp-receita", "catcompReceita");
-  if (despesas > 0) {
-    drawValorPorChaveBarChart(doMes.filter((l) => l.tipo === "despesa"), monthLabel(mk), (l) => monthKey(l.data) === mk, {
-      canvasId: "chart-meiopag", chartKey: "meiopag", keyFn: (l) => l.meio_pagamento, colorFn: meioPagamentoColor, emptyLabel: "Não informado",
-    });
-  }
+  drawCategoriaChart(doMes.filter((l) => l.tipo === "despesa"), monthLabel(mk), (l) => monthKey(l.data) === mk);
+  drawCategoriaComparativoChart("despesa", mk, prevMk, mkLabel, prevMkLabel, "chart-catcomp", "catcomp");
+  drawCategoriaComparativoChart("receita", mk, prevMk, mkLabel, prevMkLabel, "chart-catcomp-receita", "catcompReceita");
+  drawValorPorChaveBarChart(doMes.filter((l) => l.tipo === "despesa"), monthLabel(mk), (l) => monthKey(l.data) === mk, {
+    canvasId: "chart-meiopag", chartKey: "meiopag", keyFn: (l) => l.meio_pagamento, colorFn: meioPagamentoColor, emptyLabel: "Não informado",
+  });
   drawParcelasChart(mk);
   drawHistoricoDespesasChart(mk);
 }
@@ -992,16 +994,17 @@ function renderPainelGeral(root) {
   root.querySelectorAll("#geral-period-toggle button").forEach((b) => {
     b.addEventListener("click", () => { state.geralPeriodType = b.dataset.period; renderCurrentTab(); });
   });
+  // chamadas sempre incondicionais (mesmo motivo do Painel Mês): cada
+  // drawXChart já se auto-destrói e sai sem desenhar quando não há canvas ou
+  // não há dados, garantindo que o gráfico antigo nunca fique "pendurado".
+  const periodKeysSet = new Set(periodoMonthKeys());
   drawReceitasDespesasChart(periodoMonthKeys());
-  if (despesas > 0) { const periodKeysSet = new Set(periodoMonthKeys()); drawCategoriaChart(periodo.filter((l) => l.tipo === "despesa"), periodoLabel, (l) => periodKeysSet.has(monthKey(l.data))); }
-  if (despesas > 0 || prevDespesas > 0) drawCategoriaComparativoChart("despesa", periodoMonthKeys(), anterior.keys, periodoLabelCurto, anterior.label, "chart-catcomp", "catcomp");
-  if (receitas > 0 || prevReceitas > 0) drawCategoriaComparativoChart("receita", periodoMonthKeys(), anterior.keys, periodoLabelCurto, anterior.label, "chart-catcomp-receita", "catcompReceita");
-  if (despesas > 0) {
-    const periodKeysSet2 = new Set(periodoMonthKeys());
-    drawValorPorChaveBarChart(periodo.filter((l) => l.tipo === "despesa"), periodoLabel, (l) => periodKeysSet2.has(monthKey(l.data)), {
-      canvasId: "chart-meiopag", chartKey: "meiopag", keyFn: (l) => l.meio_pagamento, colorFn: meioPagamentoColor, emptyLabel: "Não informado",
-    });
-  }
+  drawCategoriaChart(periodo.filter((l) => l.tipo === "despesa"), periodoLabel, (l) => periodKeysSet.has(monthKey(l.data)));
+  drawCategoriaComparativoChart("despesa", periodoMonthKeys(), anterior.keys, periodoLabelCurto, anterior.label, "chart-catcomp", "catcomp");
+  drawCategoriaComparativoChart("receita", periodoMonthKeys(), anterior.keys, periodoLabelCurto, anterior.label, "chart-catcomp-receita", "catcompReceita");
+  drawValorPorChaveBarChart(periodo.filter((l) => l.tipo === "despesa"), periodoLabel, (l) => periodKeysSet.has(monthKey(l.data)), {
+    canvasId: "chart-meiopag", chartKey: "meiopag", keyFn: (l) => l.meio_pagamento, colorFn: meioPagamentoColor, emptyLabel: "Não informado",
+  });
 }
 
 function sum(list) { return list.reduce((acc, l) => acc + (Number(l.valor) || 0), 0); }
