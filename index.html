@@ -331,16 +331,19 @@ function tipoCustoColor(tc) {
   return tc === "Fixo" ? cssVar("--custo-fixo") : cssVar("--custo-variavel");
 }
 function isFixo(l) { return l.tipo_custo === "Fixo"; }
-// texto/cor da variação % de uma despesa em relação ao mês anterior — subir é
-// "ruim" (laranja/crítico), cair é "bom" (verde); usado nos gráficos de
-// evolução mensal de despesas.
-function pctVariacaoInfo(cur, prev) {
+// texto/cor da variação % de um valor em relação ao mês anterior. Por padrão
+// (despesas) subir é "ruim" (laranja/crítico) e cair é "bom" (verde); para
+// receitas/rendimentos, onde subir é bom, passe aumentoBom=true pra inverter
+// as cores. Usado nos gráficos de evolução mensal.
+function pctVariacaoInfo(cur, prev, aumentoBom) {
+  const corAlta = aumentoBom ? cssVar("--good") : cssVar("--critical");
+  const corQueda = aumentoBom ? cssVar("--critical") : cssVar("--good");
   if (prev === 0 && cur === 0) return null;
-  if (prev === 0 && cur > 0) return { text: "novo", color: cssVar("--critical") };
-  if (prev > 0 && cur === 0) return { text: "▼100%", color: cssVar("--good") };
+  if (prev === 0 && cur > 0) return { text: "novo", color: corAlta };
+  if (prev > 0 && cur === 0) return { text: "▼100%", color: corQueda };
   const pct = Math.round(((cur - prev) / prev) * 100);
   if (pct === 0) return { text: "=", color: cssVar("--muted") };
-  return { text: (pct > 0 ? "▲" : "▼") + Math.abs(pct) + "%", color: pct > 0 ? cssVar("--critical") : cssVar("--good") };
+  return { text: (pct > 0 ? "▲" : "▼") + Math.abs(pct) + "%", color: pct > 0 ? corAlta : corQueda };
 }
 // Escolhe texto branco ou escuro por cima de uma cor de preenchimento, pela luminância (WCAG).
 function textColorForFill_(hex) {
@@ -827,6 +830,13 @@ function renderPainelMes(root) {
     </div>
 
     <div class="card">
+      <h2>Gastos por microcategoria — ${monthLabel(mk).split(" ")[0]}</h2>
+      ${despesas > 0
+        ? `<div class="chart-wrap donut"><canvas id="chart-microcat"></canvas></div>`
+        : `<div class="empty-state"><div class="big">🗂️</div>Sem despesas neste mês ainda.</div>`}
+    </div>
+
+    <div class="card">
       <h2>Lançamentos recentes — ${mkLabel}</h2>
       <div id="recent-list">${doMes.length ? renderList(doMes.slice().sort(byDataDesc).slice(0, 8)) : `<div class="empty-state"><div class="big">📭</div>Nenhum lançamento neste mês ainda.</div>`}</div>
     </div>
@@ -862,6 +872,9 @@ function renderPainelMes(root) {
   });
   drawParcelasChart(mk);
   drawHistoricoDespesasChart(mk);
+  drawCategoriaChart(doMes.filter((l) => l.tipo === "despesa"), monthLabel(mk), (l) => monthKey(l.data) === mk, {
+    canvasId: "chart-microcat", chartKey: "microcat", keyFn: microCategoriaChave, colorFn: microCategoriaColor, emptyLabel: "—",
+  });
 }
 
 /* mostra, numa folha, todas as parcelas futuras em aberto — com edição e exclusão,
@@ -1769,6 +1782,27 @@ function microOptionsForMacro(macro) {
   state.categorias.forEach((c) => { if (c.macrocategoria === macro && c.microcategoria) set.add(c.microcategoria); });
   return Array.from(set);
 }
+// chave/label de um lançamento pro gráfico "Gastos por microcategoria" — como
+// existem microcategorias com o mesmo nome em macros diferentes (ex.:
+// "Combustível" em Transporte e em Sítio), a chave sempre inclui a macro
+// junto pra não misturar as duas no mesmo fatia do gráfico; sem microcategoria
+// preenchida, cai só na macro mesmo (não precisa desambiguar).
+function microCategoriaChave(l) {
+  const micro = l.microcategoria;
+  const macro = l.macrocategoria || "—";
+  return micro ? `${micro} · ${macro}` : macro;
+}
+// cor determinística por hash — diferente de macroColor (lista fixa de 8
+// macros conhecidas), aqui podem existir muito mais combinações de
+// micro+macro do que cores de série disponíveis, então a cor pode se repetir
+// entre categorias bem diferentes (a legenda/tooltip sempre deixa claro qual
+// é qual mesmo assim).
+function microCategoriaColor(chave) {
+  let hash = 0;
+  for (let i = 0; i < chave.length; i++) hash = (hash * 31 + chave.charCodeAt(i)) | 0;
+  const slot = (Math.abs(hash) % 8) + 1;
+  return cssVar("--series-" + slot);
+}
 function tipoColor(tipo) {
   // verde para entrada (receita), laranja para saída (despesa) — mesmo laranja já usado em "Despesas"
   return tipo === "receita" ? cssVar("--series-3") : cssVar("--critical");
@@ -1925,6 +1959,13 @@ function renderInvestimentos(root, actions) {
       <p class="muted" style="margin-top:12px; font-size:0.76rem;">Patrimônio estimado a partir do saldo atual das contas e do histórico de movimentações; edições diretas de saldo (✎) não entram nessa reconstrução.</p>
       ` : `<div class="empty-state"><div class="big">📈</div>Cadastre uma conta para ver a evolução do patrimônio.</div>`}
     </div>
+
+    <div class="card">
+      <h2>Evolução dos juros (rendimentos)</h2>
+      ${contas.length > 0
+        ? `<div class="chart-wrap"><canvas id="chart-inv-juros"></canvas></div>`
+        : `<div class="empty-state"><div class="big">📈</div>Cadastre uma conta para ver a evolução dos juros.</div>`}
+    </div>
   `;
 
   document.getElementById("add-conta-btn").addEventListener("click", addContaInvestimento);
@@ -1968,6 +2009,7 @@ function renderInvestimentos(root, actions) {
   if (contas.length > 0) {
     drawPatrimonioTotalChart(periods, patrimonioSeries);
     drawAportesRendRetChart(periods, porPeriodo);
+    drawRendimentosEvolucaoChart();
   }
 }
 
@@ -2279,14 +2321,43 @@ async function saveMovimentacao(prefill) {
 
     if (state.editingMovId) {
       const old = state.movimentacoes.find((m) => m.id === state.editingMovId);
-      if (old) await reverseMovimentoSaldo(old);
       const novo = { tipo, conta_id: contaId, conta_destino_id: contaDestinoId, valor, data, descricao };
-      await applyMovimentoSaldo(novo);
-      const lancamentoId = await syncLancamentoRendimento(novo, old);
-      const updated = await apiUpdate("Movimentacoes", state.editingMovId, { data, conta_id: contaId, tipo, valor, conta_destino_id: contaDestinoId, descricao, lancamento_id: lancamentoId });
       const idx = state.movimentacoes.findIndex((m) => m.id === state.editingMovId);
+
+      // só mexe no saldo das contas (reverter o efeito antigo e aplicar o
+      // novo) quando algo que realmente afeta saldo mudou — tipo, conta,
+      // conta de destino ou valor. Uma edição só de data/descrição (o caso
+      // mais comum: corrigir a data de um aporte ou rendimento já lançado)
+      // não precisa dessas duas chamadas extras à planilha, o que reduz o
+      // número de requisições em sequência e, com isso, a chance de uma
+      // falha no meio do caminho impedir a movimentação em si de ser salva.
+      const afetaSaldo = !old || old.tipo !== novo.tipo || old.conta_id !== novo.conta_id ||
+        (old.conta_destino_id || "") !== (novo.conta_destino_id || "") || Number(old.valor) !== Number(novo.valor);
+      if (afetaSaldo) {
+        if (old) await reverseMovimentoSaldo(old);
+        await applyMovimentoSaldo(novo);
+      }
+
+      // grava a movimentação em si PRIMEIRO, com o lancamento_id que já
+      // tinha — assim a correção que o usuário está editando (data, valor,
+      // tipo, conta, descrição) fica salva mesmo que o passo seguinte
+      // (sincronizar o lançamento de receita ligado a um rendimento) falhe.
+      const lancIdAntigo = (old && old.lancamento_id) || "";
+      let updated = await apiUpdate("Movimentacoes", state.editingMovId, {
+        data, conta_id: contaId, tipo, valor, conta_destino_id: contaDestinoId, descricao, lancamento_id: lancIdAntigo,
+      });
       if (idx !== -1) state.movimentacoes[idx] = updated;
-      toast("Movimentação atualizada.");
+
+      try {
+        const lancamentoId = await syncLancamentoRendimento(novo, old);
+        if (lancamentoId !== lancIdAntigo) {
+          updated = await apiUpdate("Movimentacoes", state.editingMovId, { lancamento_id: lancamentoId });
+          if (idx !== -1) state.movimentacoes[idx] = updated;
+        }
+        toast("Movimentação atualizada.");
+      } catch (syncErr) {
+        toast("Movimentação salva, mas não consegui atualizar o lançamento de receita vinculado: " + syncErr.message);
+      }
     } else {
       const lancamentoId = await syncLancamentoRendimento({ tipo, conta_id: contaId, valor, data, descricao }, null);
       const created = await apiCreate("Movimentacoes", { data, conta_id: contaId, tipo, valor, conta_destino_id: contaDestinoId, descricao, lancamento_id: lancamentoId });
@@ -2381,6 +2452,73 @@ function drawAportesRendRetChart(periods, porPeriodo) {
   state.charts.invAportesRendRet.canvas.addEventListener("dblclick", (evt) => {
     const points = state.charts.invAportesRendRet.getElementsAtEventForMode(evt, "nearest", { intersect: true }, true);
     if (points.length) abrirTipoPeriodo(points[0].datasetIndex, points[0].index);
+  });
+}
+
+// gráfico 3: evolução só dos juros/rendimentos, sempre por mês (independente
+// do granularidade mês/trimestre/ano escolhida acima) — últimos 5 meses
+// corridos até o mês atual. Mesmo padrão de variação % em relação ao mês
+// anterior usado nos gráficos de despesa, mas aqui subir é bom (verde) e cair
+// é ruim (laranja), já que é dinheiro ganho.
+function drawRendimentosEvolucaoChart() {
+  destroyChart("invJuros");
+  const ctx = document.getElementById("chart-inv-juros");
+  if (!ctx) return;
+  const mk = currentMonthKey();
+  const keys = monthWindowKeys(mk, 4, 0); // 4 meses antes + o atual = 5 meses
+  const valores = keys.map((k) => sum(state.movimentacoes.filter((m) => m.tipo === "rendimento" && monthKey(m.data) === k)));
+  // mês anterior ao início da janela, só pra calcular a variação % da
+  // primeira barra visível (não é exibido no gráfico).
+  const mesAnteriorKey = shiftMonthKey(keys[0], -1);
+  const valorMesAnterior0 = sum(state.movimentacoes.filter((m) => m.tipo === "rendimento" && monthKey(m.data) === mesAnteriorKey));
+  const valorAnterior = (i) => (i === 0 ? valorMesAnterior0 : valores[i - 1]);
+
+  const abrirMes = (idx) => {
+    const mkSel = keys[idx];
+    showMovimentacoesGenerico((m) => m.tipo === "rendimento" && monthKey(m.data) === mkSel, `Rendimentos — ${monthLabel(mkSel)}`);
+  };
+
+  const pctJurosPlugin = {
+    id: "pctVariacaoJuros",
+    afterDatasetsDraw(chart) {
+      const meta = chart.getDatasetMeta(0);
+      if (!meta || meta.hidden) return;
+      const c = chart.ctx;
+      c.save();
+      c.font = "700 10px system-ui, -apple-system, sans-serif";
+      c.textAlign = "center";
+      meta.data.forEach((bar, i) => {
+        const info = pctVariacaoInfo(valores[i], valorAnterior(i), true);
+        if (!info) return;
+        c.fillStyle = info.color;
+        c.fillText(info.text, bar.x, bar.y - 6);
+      });
+      c.restore();
+    },
+  };
+
+  const opts = chartBaseOptions({ legend: false });
+  opts.layout = { padding: { top: 18 } };
+  opts.plugins.tooltip = tooltipStyle((c) => formatBRL(c.raw));
+
+  state.charts.invJuros = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels: keys.map((k) => monthLabel(k).slice(0,3)),
+      datasets: [{ label: "Rendimentos", data: valores, backgroundColor: cssVar("--series-1"), borderRadius: 4, maxBarThickness: 30 }],
+    },
+    options: Object.assign({}, opts, {
+      onClick: (evt, _els, chart) => {
+        const points = chart.getElementsAtEventForMode(evt, "nearest", { intersect: true }, true);
+        if (points.length) abrirMes(points[0].index);
+      },
+      onHover: pointerCursorOnHover,
+    }),
+    plugins: [pctJurosPlugin],
+  });
+  state.charts.invJuros.canvas.addEventListener("dblclick", (evt) => {
+    const points = state.charts.invJuros.getElementsAtEventForMode(evt, "nearest", { intersect: true }, true);
+    if (points.length) abrirMes(points[0].index);
   });
 }
 
