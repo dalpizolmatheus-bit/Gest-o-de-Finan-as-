@@ -832,7 +832,8 @@ function renderPainelMes(root) {
     <div class="card">
       <h2>Gastos por microcategoria — ${monthLabel(mk).split(" ")[0]}</h2>
       ${despesas > 0
-        ? `<div class="chart-wrap donut"><canvas id="chart-microcat"></canvas></div>`
+        ? `<p class="muted" style="margin:-2px 0 10px;">Arraste para o lado para ver todas as categorias.</p>
+           <div class="chart-scroll"><div class="chart-wrap wide" id="chart-microcat-wrap"><canvas id="chart-microcat"></canvas></div></div>`
         : `<div class="empty-state"><div class="big">🗂️</div>Sem despesas neste mês ainda.</div>`}
     </div>
 
@@ -872,8 +873,8 @@ function renderPainelMes(root) {
   });
   drawParcelasChart(mk);
   drawHistoricoDespesasChart(mk);
-  drawCategoriaChart(doMes.filter((l) => l.tipo === "despesa"), monthLabel(mk), (l) => monthKey(l.data) === mk, {
-    canvasId: "chart-microcat", chartKey: "microcat", keyFn: microCategoriaChave, colorFn: microCategoriaColor, emptyLabel: "—",
+  drawValorPorChaveBarChart(doMes.filter((l) => l.tipo === "despesa"), monthLabel(mk), (l) => monthKey(l.data) === mk, {
+    canvasId: "chart-microcat", chartKey: "microcat", keyFn: microCategoriaChave, colorFn: microCategoriaColor, emptyLabel: "—", showPct: true,
   });
 }
 
@@ -1357,7 +1358,11 @@ function drawCategoriaChart(despesasList, periodLabel, periodMatchFn, opts) {
 
 /* Gráfico de barras com o valor em R$ (não %) por chave (ex.: forma de pagamento),
    empilhado por tipo de custo — fixo embaixo, variável em cima. keyFn extrai a
-   chave de cada lançamento (ex.: meio de pagamento). */
+   chave de cada lançamento (ex.: meio de pagamento). Com opts.showPct:true, o
+   rótulo acima da barra passa a ser o % que a categoria representa do total
+   (como numa pizza), e se existir um elemento "<canvasId>-wrap" no DOM a largura
+   dele é ajustada dinamicamente pra caber uma barra por categoria com scroll
+   horizontal (ex.: microcategoria, que pode ter muitas chaves distintas). */
 function drawValorPorChaveBarChart(despesasList, periodLabel, periodMatchFn, opts) {
   opts = opts || {};
   const canvasId = opts.canvasId;
@@ -1365,15 +1370,20 @@ function drawValorPorChaveBarChart(despesasList, periodLabel, periodMatchFn, opt
   const keyFn = opts.keyFn;
   const colorFn = opts.colorFn;
   const emptyLabel = opts.emptyLabel || "—";
+  const showPct = !!opts.showPct;
   destroyChart(chartKey);
   const byKey = {};
   despesasList.forEach((l) => { const k = keyFn(l) || emptyLabel; byKey[k] = (byKey[k] || 0) + Number(l.valor || 0); });
   const entries = Object.entries(byKey).sort((a, b) => b[1] - a[1]);
+  const total = entries.reduce((s, e) => s + e[1], 0);
   const ctx = document.getElementById(canvasId);
   if (!ctx || !entries.length) return;
   const colors = entries.map((e) => colorFn(e[0]));
 
-  // desenha o valor em R$ em cima de cada barra
+  const wrapEl = document.getElementById(canvasId + "-wrap");
+  if (wrapEl) wrapEl.style.width = Math.max(entries.length * 70, 340) + "px";
+
+  // desenha o rótulo em cima de cada barra: % do total (showPct) ou valor em R$
   const valuePlugin = {
     id: "valorBarLabel" + chartKey,
     afterDatasetsDraw(chart) {
@@ -1386,7 +1396,8 @@ function drawValorPorChaveBarChart(despesasList, periodLabel, periodMatchFn, opt
       c.fillStyle = cssVar("--text-primary");
       meta.data.forEach((bar, i) => {
         if (chart.getDataVisibility && !chart.getDataVisibility(i)) return;
-        c.fillText(formatBRL(entries[i][1]), bar.x, bar.y - 8);
+        const label = showPct ? (total ? Math.round((entries[i][1] / total) * 100) + "%" : "0%") : formatBRL(entries[i][1]);
+        c.fillText(label, bar.x, bar.y - 8);
       });
       c.restore();
     },
@@ -1396,7 +1407,11 @@ function drawValorPorChaveBarChart(despesasList, periodLabel, periodMatchFn, opt
   chartOpts.layout = { padding: { top: 22 } };
   chartOpts.scales.x.ticks.autoSkip = false;
   chartOpts.onHover = pointerCursorOnHover;
-  chartOpts.plugins.tooltip = tooltipStyle((c) => formatBRL(c.raw));
+  chartOpts.plugins.tooltip = tooltipStyle((c) => {
+    if (!showPct) return formatBRL(c.raw);
+    const pct = total ? Math.round((c.raw / total) * 100) : 0;
+    return `${formatBRL(c.raw)} (${pct}%)`;
+  });
 
   state.charts[chartKey] = new Chart(ctx, {
     type: "bar",
